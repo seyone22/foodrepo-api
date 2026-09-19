@@ -13,7 +13,7 @@ import {
   vector,
   integer,
 } from "drizzle-orm/pg-core";
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 
 // ----------------------------------------------------------------------
 // DEFINE CUSTOM POSTGRES SCHEMA
@@ -125,7 +125,12 @@ export const ingredients = foodrepo.table("ingredients", {
 
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
+},
+(table) => [
+  index("idx_ingredients_lower_name").on(sql`lower(${table.name})`),
+  index("idx_ingredients_aliases_gin").using("gin", table.aliases),
+  index("idx_ingredients_part_of_gin").using("gin", table.partOf),
+]);
 
 export const priceSources = foodrepo.table("price_sources", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -213,6 +218,10 @@ export const mappings = foodrepo.table(
     uniqueIndex("mapping_product_source_idx").on(
       table.productId,
       table.sourceId,
+    ),
+    index("idx_mappings_matched_ingredients_gin").using(
+      "gin",
+      table.matchedIngredients,
     ),
   ],
 );

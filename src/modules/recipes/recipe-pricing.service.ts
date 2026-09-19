@@ -263,40 +263,47 @@ export async function evaluateRecipePricing(
     requiredUnit: string;
     isExcluded: boolean;
   }
-  const evaluations: IngredientEvaluation[] = [];
 
-  // 1️⃣ First pass: Resolve canonical ingredients & fetch all candidate store offers
-  for (const rawSupply of recipe.recipeIngredient) {
-    const supplyName = rawSupply.name?.trim() || "";
-    const isExcluded =
-      !supplyName ||
-      excludeList.has(supplyName.toLowerCase()) ||
-      (rawSupply.identifier &&
-        excludeList.has(rawSupply.identifier.toLowerCase()));
+  const graphTraversal = new GraphTraversalService();
 
-    // Scale ingredient quantity
-    const originalQty = rawSupply.requiredQuantity?.value ?? 1;
-    const scaledQty = Math.round(originalQty * scaleFactor * 100) / 100;
-    const unitText = rawSupply.requiredQuantity?.unitText || "unit";
+  // 1️⃣ First pass: Resolve canonical ingredients & fetch all candidate store offers in parallel
+  const evaluations: IngredientEvaluation[] = await Promise.all(
+    recipe.recipeIngredient.map(async (rawSupply): Promise<IngredientEvaluation> => {
+      const supplyName = rawSupply.name?.trim() || "";
+      const isExcluded =
+        !supplyName ||
+        excludeList.has(supplyName.toLowerCase()) ||
+        (rawSupply.identifier &&
+          excludeList.has(rawSupply.identifier.toLowerCase()));
 
-    const baseSupply: HowToSupply = {
-      "@type": "HowToSupply",
-      name: supplyName,
-      identifier: rawSupply.identifier || null,
-      requiredQuantity: {
-        "@type": "QuantitativeValue",
-        value: scaledQty,
-        unitText,
-      },
-      offers: [],
-      status: isExcluded ? "excluded" : "unpriced",
-    };
+      // Scale ingredient quantity
+      const originalQty = rawSupply.requiredQuantity?.value ?? 1;
+      const scaledQty = Math.round(originalQty * scaleFactor * 100) / 100;
+      const unitText = rawSupply.requiredQuantity?.unitText || "unit";
 
-    if (isExcluded) {
-      baseSupply.note = "Excluded by user options";
-      enrichedIngredients.push(baseSupply);
-      continue;
-    }
+      const baseSupply: HowToSupply = {
+        "@type": "HowToSupply",
+        name: supplyName,
+        identifier: rawSupply.identifier || null,
+        requiredQuantity: {
+          "@type": "QuantitativeValue",
+          value: scaledQty,
+          unitText,
+        },
+        offers: [],
+        status: isExcluded ? "excluded" : "unpriced",
+      };
+
+      if (isExcluded) {
+        baseSupply.note = "Excluded by user options";
+        return {
+          supply: baseSupply,
+          offers: [],
+          requiredQty: scaledQty,
+          requiredUnit: unitText,
+          isExcluded: true,
+        };
+      }
 
     // -----------------------------------------------------------------------
     // Multi-Stage Ingredient & Supermarket Product Resolver
@@ -718,7 +725,6 @@ export async function evaluateRecipePricing(
       return true;
     };
 
-    const graphTraversal = new GraphTraversalService();
     let traversal: TraversalResolution | null = null;
     let effectiveQty = scaledQty;
     let effectiveUnit = unitText;
@@ -1029,8 +1035,13 @@ export async function evaluateRecipePricing(
     if (filteredMapped.length === 0) {
       baseSupply.status = "unpriced";
       baseSupply.note = "No products found in selected supermarkets";
-      enrichedIngredients.push(baseSupply);
-      continue;
+      return {
+        supply: baseSupply,
+        offers: [],
+        requiredQty: scaledQty,
+        requiredUnit: unitText,
+        isExcluded: false,
+      };
     }
 
     const productIds = filteredMapped.map((m) => m.product.id);
@@ -1206,14 +1217,15 @@ export async function evaluateRecipePricing(
       candidateOffers.push(offer);
     }
 
-    evaluations.push({
-      supply: baseSupply,
-      offers: candidateOffers,
-      requiredQty: scaledQty,
-      requiredUnit: unitText,
-      isExcluded: false,
-    });
-  }
+      return {
+        supply: baseSupply,
+        offers: candidateOffers,
+        requiredQty: scaledQty,
+        requiredUnit: unitText,
+        isExcluded: false,
+      };
+    }),
+  );
 
   // 2️⃣ Single Store Evaluation (if "cheapest_single_store")
   let winningSingleStore: string | null = null;
@@ -1224,6 +1236,7 @@ export async function evaluateRecipePricing(
     > = {};
 
     for (const item of evaluations) {
+      if (item.isExcluded) continue;
       for (const offer of item.offers) {
         const storeId = offer.seller?.identifier || "unknown";
         const storeName = offer.seller?.name || "Unknown Supermarket";
@@ -1254,6 +1267,11 @@ export async function evaluateRecipePricing(
   let defaultCurrency = "LKR";
 
   for (const item of evaluations) {
+    if (item.isExcluded) {
+      enrichedIngredients.push(item.supply);
+      continue;
+    }
+
     if (item.offers.length === 0) {
       item.supply.status = "unpriced";
       item.supply.note = "No price available";

@@ -103,6 +103,7 @@ const GENERIC_PARENT_NOUNS = new Set([
 @Injectable()
 export class GraphTraversalService {
   private readonly logger = new Logger(GraphTraversalService.name);
+  private readonly resolutionCache = new Map<string, Promise<TraversalResolution | null>>();
 
   /**
    * Fetch products with latest prices for a list of ingredient UUIDs.
@@ -542,6 +543,22 @@ export class GraphTraversalService {
     const clean = queryText.trim().toLowerCase();
     if (!clean) return null;
 
+    const sourcesKey = options.allowedSources ? [...options.allowedSources].sort().join(",") : "";
+    const cacheKey = `${clean}::child=${options.disableChildAggregation ? 1 : 0}::deriv=${options.includeDerivatives === false ? 0 : 1}::src=${sourcesKey}::max=${options.maxAncestorLevel ?? 4}`;
+
+    if (this.resolutionCache.has(cacheKey)) {
+      return this.resolutionCache.get(cacheKey)!;
+    }
+
+    const promise = this.executeResolveByNameOrQuery(clean, options);
+    this.resolutionCache.set(cacheKey, promise);
+    return promise;
+  }
+
+  private async executeResolveByNameOrQuery(
+    clean: string,
+    options: TraversalOptions,
+  ): Promise<TraversalResolution | null> {
     // Stage 1: Exact match on canonical ingredient name
     const exactIng = await db.query.ingredients.findFirst({
       where: sql`LOWER(${ingredients.name}) = ${clean}`,
