@@ -279,13 +279,26 @@ export async function evaluateRecipePricing(
         "mosquito",
         "coloring",
         "colouring",
+        "after shave",
+        "aftershave",
+        "shaving",
+        "shave",
+        "cologne",
+        "perfume",
+        "deodorant",
+        "toothpaste",
+        "pet food",
+        "dog food",
+        "cat food",
+        "pedigree",
+        "whiskas",
       ];
       for (const bad of nonFoodKeywords) {
         if (lower.includes(bad) && !clean.includes(bad)) return false;
       }
       if (
         catPath?.some((c) =>
-          /household|beauty|personal|cleaning|laundry/i.test(c),
+          /household|beauty|personal|cleaning|laundry|cosmetic|toiletries|pet/i.test(c),
         )
       ) {
         return false;
@@ -583,6 +596,74 @@ export async function evaluateRecipePricing(
         if (nonFreshTomatoWords.some((w) => lower.includes(w))) return false;
       }
 
+      // 12. Pie Crust / Pie Dough / Pastry (exclude bread, buns, toast, rusks)
+      if (
+        clean.includes("crust") ||
+        clean.includes("dough") ||
+        clean.includes("pastry")
+      ) {
+        const nonPastryWords = [
+          "bread",
+          "paan",
+          "loaf",
+          "sliced",
+          "sandwich",
+          "bun",
+          "rusk",
+          "toast",
+        ];
+        if (nonPastryWords.some((w) => lower.includes(w))) return false;
+      }
+
+      // 13. Salt / Table Salt (exclude flavored snacks, soy meat, chips)
+      if (
+        clean === "salt" ||
+        clean.includes("table salt") ||
+        clean.includes("fine salt")
+      ) {
+        const nonSaltWords = [
+          "soya",
+          "meat",
+          "curry",
+          "chip",
+          "cracker",
+          "biscuit",
+          "snack",
+          "butter",
+          "cashew",
+          "peanut",
+          "dhal",
+          "fruit salt",
+          "eno",
+          "toothpaste",
+        ];
+        if (nonSaltWords.some((w) => lower.includes(w))) return false;
+      }
+
+      // 14. Spices (cinnamon, nutmeg, cloves, ginger)
+      if (
+        clean.includes("cinnamon") ||
+        clean.includes("nutmeg") ||
+        clean.includes("clove")
+      ) {
+        const nonSpiceWords = [
+          "shave",
+          "perfume",
+          "fragrance",
+          "soap",
+          "tea",
+          "shampoo",
+          "lotion",
+          "cream",
+          "toothpaste",
+          "candle",
+          "incense",
+          "oil 10ml",
+          "essential oil",
+        ];
+        if (nonSpiceWords.some((w) => lower.includes(w))) return false;
+      }
+
       return true;
     };
 
@@ -596,6 +677,7 @@ export async function evaluateRecipePricing(
       try {
         traversal = await graphTraversal.resolveByIngredientId(rawSupply.identifier, {
           allowedSources: allowedSources || undefined,
+          disableChildAggregation: true,
         });
         if (traversal && traversal.products.length > 0) {
           resolvedId = traversal.ingredientId;
@@ -760,6 +842,7 @@ export async function evaluateRecipePricing(
       // 1. Primary traversal on clean supply name
       traversal = await graphTraversal.resolveByNameOrQuery(clean, {
         allowedSources: allowedSources || undefined,
+        disableChildAggregation: true,
       });
 
       // 2. Synonyms traversal
@@ -767,6 +850,7 @@ export async function evaluateRecipePricing(
         for (const syn of SYNONYMS[clean]) {
           traversal = await graphTraversal.resolveByNameOrQuery(syn, {
             allowedSources: allowedSources || undefined,
+            disableChildAggregation: true,
           });
           if (traversal && traversal.products.length > 0) break;
         }
@@ -778,6 +862,7 @@ export async function evaluateRecipePricing(
           if (cand === clean) continue;
           traversal = await graphTraversal.resolveByNameOrQuery(cand, {
             allowedSources: allowedSources || undefined,
+            disableChildAggregation: true,
           });
           if (traversal && traversal.products.length > 0) break;
         }

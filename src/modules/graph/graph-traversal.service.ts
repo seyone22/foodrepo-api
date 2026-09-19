@@ -50,7 +50,30 @@ export interface TraversalOptions {
   allowedSources?: string[];
   maxAncestorLevel?: number;
   includeDerivatives?: boolean;
+  disableChildAggregation?: boolean;
 }
+
+const PREPARATION_MODIFIERS = new Set([
+  "ground",
+  "powdered",
+  "powder",
+  "crushed",
+  "grated",
+  "whole",
+  "fresh",
+  "pure",
+  "light",
+  "dark",
+  "raw",
+  "fine",
+  "dry",
+  "dried",
+  "unbleached",
+  "unsalted",
+  "salted",
+  "toasted",
+  "granulated",
+]);
 
 const GENERIC_PARENT_NOUNS = new Set([
   "puree",
@@ -202,11 +225,12 @@ export class GraphTraversalService {
       options.allowedSources,
     );
 
-    // 2. Child ingredients (downward aggregation)
-    const childIngredients = await db
-      .select({ id: ingredients.id, name: ingredients.name })
-      .from(ingredients)
-      .where(sql`${ingredients.partOf} @> ARRAY[${nameLower}]::text[]`);
+    // 2. Child ingredients (downward aggregation - skipped if disableChildAggregation is set)
+    if (!options.disableChildAggregation) {
+      const childIngredients = await db
+        .select({ id: ingredients.id, name: ingredients.name })
+        .from(ingredients)
+        .where(sql`${ingredients.partOf} @> ARRAY[${nameLower}]::text[]`);
 
     if (childIngredients.length > 0) {
       const childIds = childIngredients.map((c) => c.id);
@@ -273,6 +297,7 @@ export class GraphTraversalService {
         }
       }
     }
+  }
 
     if (directProducts.length > 0) {
       return {
@@ -382,17 +407,15 @@ export class GraphTraversalService {
         AND EXISTS (
           SELECT 1
           FROM jsonb_array_elements(derivatives) elem
-          WHERE lower(elem->>'name') = ${clean}
-             OR ${clean} LIKE '%' || lower(elem->>'name') || '%'
-             OR lower(elem->>'name') LIKE '%' || ${clean} || '%'
+          WHERE (
+            lower(elem->>'name') = ${clean}
+            OR lower(elem->>'name') = ${clean + 's'}
+            OR lower(elem->>'name') || 's' = ${clean}
+          )
+          AND elem->>'yieldRatio' IS NOT NULL
         )
       ORDER BY
-        CASE WHEN lower(name) IN ('puree', 'juice', 'oil', 'powder', 'sauce', 'paste', 'syrup', 'flour', 'mix', 'water', 'below') THEN 1 ELSE 0 END ASC,
-        CASE WHEN EXISTS (
-          SELECT 1 FROM jsonb_array_elements(derivatives) elem 
-          WHERE (lower(elem->>'name') = ${clean} OR ${clean} LIKE '%' || lower(elem->>'name') || '%')
-            AND elem->>'yieldRatio' IS NOT NULL
-        ) THEN 0 ELSE 1 END ASC
+        CASE WHEN lower(name) IN ('puree', 'juice', 'oil', 'powder', 'sauce', 'paste', 'syrup', 'flour', 'mix', 'water', 'below') THEN 1 ELSE 0 END ASC
       LIMIT 5
     `;
 
@@ -411,9 +434,10 @@ export class GraphTraversalService {
           matchedDerivative = row.derivatives.find((d: any) => {
             const dName = String(d?.name || "").toLowerCase().trim();
             return (
-              dName === clean ||
-              clean.includes(dName) ||
-              dName.includes(clean)
+              (dName === clean ||
+                dName === clean + "s" ||
+                dName + "s" === clean) &&
+              d.yieldRatio != null
             );
           });
         }
@@ -469,6 +493,37 @@ export class GraphTraversalService {
       const resolved = await this.resolveByIngredientId(aliasIng.id, options);
       if (resolved && resolved.products.length > 0) {
         return resolved;
+      }
+    }
+
+    // Stage 2.5: Preparation modifier stripping (e.g. "ground cinnamon" -> "cinnamon", "light brown sugar" -> "brown sugar")
+    const wordsList = clean.split(/\s+/);
+    const strippedWords = wordsList.filter((w) => !PREPARATION_MODIFIERS.has(w));
+    if (strippedWords.length > 0 && strippedWords.length < wordsList.length) {
+      const strippedClean = strippedWords.join(" ");
+      const strippedDirect = await db.query.ingredients.findFirst({
+        where: sql`LOWER(${ingredients.name}) = ${strippedClean}`,
+        columns: { id: true, name: true },
+      });
+      if (strippedDirect) {
+        const resolved = await this.resolveByIngredientId(strippedDirect.id, options);
+        if (resolved && resolved.products.length > 0) {
+          return {
+            ...resolved,
+            relation: resolved.relation === "direct" ? "direct" : resolved.relation,
+          };
+        }
+      }
+
+      const strippedAlias = await db.query.ingredients.findFirst({
+        where: sql`${strippedClean} = ANY(SELECT lower(unnest(${ingredients.aliases})))`,
+        columns: { id: true, name: true },
+      });
+      if (strippedAlias) {
+        const resolved = await this.resolveByIngredientId(strippedAlias.id, options);
+        if (resolved && resolved.products.length > 0) {
+          return resolved;
+        }
       }
     }
 
