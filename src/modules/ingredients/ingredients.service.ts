@@ -457,15 +457,22 @@ export class IngredientsService {
       });
     };
 
-    const descendantIds = await this.getDescendantIngredientIds(pgId);
-    let productsWithLatestPrices = await fetchProductsForIngredients(descendantIds);
+    const directProducts = await fetchProductsForIngredients([pgId]);
+    let productsWithLatestPrices = directProducts;
     let resolvedFrom: { ingredient: string; relation: string } | undefined = undefined;
 
-    if (productsWithLatestPrices.length > 0 && descendantIds.length > 1) {
-      resolvedFrom = {
-        ingredient: ing.name,
-        relation: "varieties",
-      };
+    if (productsWithLatestPrices.length === 0) {
+      const descendantIds = await this.getDescendantIngredientIds(pgId);
+      if (descendantIds.length > 1) {
+        const varietyProducts = await fetchProductsForIngredients(descendantIds);
+        if (varietyProducts.length > 0) {
+          productsWithLatestPrices = varietyProducts;
+          resolvedFrom = {
+            ingredient: ing.name,
+            relation: "varieties",
+          };
+        }
+      }
     }
 
     const BROAD_META_CATEGORIES = new Set([
@@ -521,6 +528,7 @@ export class IngredientsService {
       ingredient: ing.name,
       ingredientId: ing.id,
       products: productsWithLatestPrices,
+      prices: productsWithLatestPrices,
       ...(resolvedFrom && { resolvedFrom }),
     };
   }
