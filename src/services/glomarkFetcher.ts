@@ -215,9 +215,22 @@ export class GlomarkFetcher extends SupermarketFetcher {
       );
     }
 
-    const price = normalizePrice(raw.priceText);
+    let price = normalizePrice(raw.priceText);
     const mrp = raw.mrpText ? normalizePrice(raw.mrpText) : null;
     const { quantity, unit } = normalizeQuantityUnit(raw.title);
+
+    // Glomark bulk loose items (e.g. Sugar Brown Bulk, Sugar White Bulk, Rice Bulk)
+    // display prices per 100g on their web storefront (price < 60 LKR with unit defaulted to kg).
+    // Normalize to 1kg basis to match supermarket packaging standards.
+    if (
+      raw.title?.toLowerCase().includes("bulk") &&
+      price > 0 &&
+      price < 60 &&
+      unit === "kg" &&
+      quantity === 1
+    ) {
+      price = price * 10;
+    }
 
     const fullUrl = raw.url
       ? raw.url.startsWith("http")
