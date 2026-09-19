@@ -568,6 +568,44 @@ export class GraphTraversalService {
       }
     }
 
+    // Stage 2.1: Singular / Plural inflection normalization (e.g. "apples" <-> "apple", "tomatoes" <-> "tomato")
+    const inflectionCandidates: string[] = [];
+    if (clean.endsWith("ies") && clean.length > 4) {
+      inflectionCandidates.push(clean.slice(0, -3) + "y");
+    }
+    if (clean.endsWith("es") && clean.length > 3) {
+      inflectionCandidates.push(clean.slice(0, -2));
+    }
+    if (clean.endsWith("s") && !clean.endsWith("ss") && clean.length > 2) {
+      inflectionCandidates.push(clean.slice(0, -1));
+    }
+    inflectionCandidates.push(clean + "s", clean + "es");
+
+    for (const inf of inflectionCandidates) {
+      if (inf === clean) continue;
+      const infExact = await db.query.ingredients.findFirst({
+        where: sql`LOWER(${ingredients.name}) = ${inf}`,
+        columns: { id: true, name: true },
+      });
+      if (infExact) {
+        const resolved = await this.resolveByIngredientId(infExact.id, options);
+        if (resolved && resolved.products.length > 0) {
+          return resolved;
+        }
+      }
+
+      const infAlias = await db.query.ingredients.findFirst({
+        where: sql`${inf} = ANY(SELECT lower(unnest(${ingredients.aliases})))`,
+        columns: { id: true, name: true },
+      });
+      if (infAlias) {
+        const resolved = await this.resolveByIngredientId(infAlias.id, options);
+        if (resolved && resolved.products.length > 0) {
+          return resolved;
+        }
+      }
+    }
+
     // Stage 2.5: Preparation modifier stripping (e.g. "ground cinnamon" -> "cinnamon", "light brown sugar" -> "brown sugar")
     const wordsList = clean.split(/\s+/);
     const strippedWords = wordsList.filter((w) => !PREPARATION_MODIFIERS.has(w));

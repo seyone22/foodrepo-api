@@ -781,6 +781,8 @@ export async function evaluateRecipePricing(
           "wheat flour",
         ],
         "plain flour": ["plain flour", "all purpose flour", "wheat flour"],
+        apples: ["apple", "fresh apple", "apples"],
+        apple: ["apple", "fresh apple", "apples"],
         "apple juice": ["apple juice", "apple nectar"],
         "lemon juice": ["lemon juice", "lemon", "fresh lemon"],
         "black pepper": ["black pepper", "pepper powder", "peppercorns"],
@@ -873,6 +875,12 @@ export async function evaluateRecipePricing(
       const candidates = [
         clean,
         ...(SYNONYMS[clean] || []),
+        ...(clean.endsWith("s") && !clean.endsWith("ss") && clean.length > 3
+          ? [clean.slice(0, -1)]
+          : []),
+        ...(clean.endsWith("es") && clean.length > 4
+          ? [clean.slice(0, -2)]
+          : []),
         ...(words.length > 1
           ? [words.slice(1).join(" "), words.join(" ")].filter(
               (w) => !GENERIC_FOOD_NOUNS.has(w),
