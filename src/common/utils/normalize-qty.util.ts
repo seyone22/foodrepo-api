@@ -213,10 +213,23 @@ export function normalizeQuantityUnit(raw: any): NormalizedQtyUnit {
     }
   }
 
-  // Heuristics for broken fields
-  if ((unit === "kg" || unit === "") && raw?.quantity) {
-    quantity = raw.quantity * 1000;
-    unit = "g";
+  // Heuristics for broken or structured fields
+  if (raw?.quantity && typeof raw.quantity === "number" && raw.quantity > 0) {
+    if (unit === "kg") {
+      quantity = raw.quantity * 1000;
+      unit = "g";
+    } else if (unit === "l" || unit === "lt") {
+      quantity = raw.quantity * 1000;
+      unit = "ml";
+    } else if (unit === "g" || unit === "ml") {
+      quantity = raw.quantity;
+    } else if (unit === "no" || unit === "ea" || unit === "unit" || unit === "pcs") {
+      quantity = raw.quantity;
+      unit = "unit";
+    } else if (!unit || unit === "") {
+      quantity = raw.quantity * 1000;
+      unit = "g";
+    }
   } else if (unit === "no" || unit === "ea") {
     quantity = 1;
     unit = "unit";
