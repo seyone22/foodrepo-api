@@ -37,10 +37,15 @@ async function bootstrap() {
 
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup("api/docs", app, document);
+  SwaggerModule.setup("docs", app, document);
+
+  // Redirect root / to Swagger docs
+  const httpAdapter = app.getHttpAdapter();
+  httpAdapter.get("/", (_req: any, res: any) => res.redirect("/api/docs"));
 
   const port = process.env.PORT || 4000;
   await app.listen(port);
   console.log(`🚀 FoodRepo API running at: http://localhost:${port}/api/v1`);
-  console.log(`📖 Swagger documentation at: http://localhost:${port}/api/docs`);
+  console.log(`📖 Swagger documentation at: http://localhost:${port}/api/docs (also /docs)`);
 }
 bootstrap();
