@@ -102,50 +102,36 @@ export class IngredientsService {
   }
 
   async getDescendantIngredientIds(rootId: string): Promise<string[]> {
-    const visited = new Set<string>();
-    const queue: string[] = [rootId];
+    const root = await db.query.ingredients.findFirst({
+      where: eq(ingredients.id, toPgId(rootId)),
+      columns: { id: true, name: true, varieties: true },
+    });
+    if (!root) return [rootId];
 
-    while (queue.length > 0) {
-      const currentId = queue.shift()!;
-      if (visited.has(currentId)) continue;
-      visited.add(currentId);
+    const visited = new Set<string>([root.id]);
+    const rootNameLower = root.name.trim().toLowerCase();
 
-      const current = await db.query.ingredients.findFirst({
-        where: eq(ingredients.id, toPgId(currentId)),
-        columns: { id: true, name: true, varieties: true },
-      });
+    const partOfChildren = await db
+      .select({ id: ingredients.id })
+      .from(ingredients)
+      .where(sql`${ingredients.partOf} @> ARRAY[${rootNameLower}]::text[]`);
 
-      if (!current) continue;
+    for (const c of partOfChildren) {
+      visited.add(c.id);
+    }
 
-      if (current.varieties && current.varieties.length > 0) {
-        const varietyNames = current.varieties
-          .filter(Boolean)
-          .map((v) => v.trim().toLowerCase());
-        if (varietyNames.length > 0) {
-          const childRows = await db
-            .select({ id: ingredients.id })
-            .from(ingredients)
-            .where(inArray(sql`LOWER(${ingredients.name})`, varietyNames));
+    if (root.varieties && root.varieties.length > 0) {
+      const varietyNames = root.varieties
+        .filter(Boolean)
+        .map((v) => v.trim().toLowerCase());
+      if (varietyNames.length > 0) {
+        const varietyChildren = await db
+          .select({ id: ingredients.id })
+          .from(ingredients)
+          .where(inArray(ingredients.name, varietyNames));
 
-          for (const child of childRows) {
-            if (!visited.has(child.id)) {
-              queue.push(child.id);
-            }
-          }
-        }
-      }
-
-      const currentNameLower = current.name.trim().toLowerCase();
-      const partOfChildren = await db
-        .select({ id: ingredients.id })
-        .from(ingredients)
-        .where(
-          sql`EXISTS (SELECT 1 FROM unnest(${ingredients.partOf}) p WHERE LOWER(p) = ${currentNameLower})`,
-        );
-
-      for (const child of partOfChildren) {
-        if (!visited.has(child.id)) {
-          queue.push(child.id);
+        for (const c of varietyChildren) {
+          visited.add(c.id);
         }
       }
     }
@@ -398,7 +384,7 @@ export class IngredientsService {
 
     const ing = await db.query.ingredients.findFirst({
       where: eq(ingredients.id, pgId),
-      columns: { id: true, name: true, partOf: true },
+      columns: { id: true, name: true, partOf: true, varieties: true },
     });
 
     if (!ing) return null;
@@ -410,6 +396,7 @@ export class IngredientsService {
         .select({
           product: products,
           source: priceSources,
+          matchedIngredients: mappings.matchedIngredients,
         })
         .from(mappings)
         .innerJoin(products, eq(products.id, mappings.productId))
@@ -423,7 +410,7 @@ export class IngredientsService {
 
       if (mapped.length === 0) return [];
 
-      const uniqueMappedMap = new Map<string, { product: ProductRow; source: any }>();
+      const uniqueMappedMap = new Map<string, { product: ProductRow; source: any; matchedIngredients: string[] | null }>();
       for (const item of mapped) {
         if (!uniqueMappedMap.has(item.product.id)) {
           uniqueMappedMap.set(item.product.id, item);
@@ -445,11 +432,12 @@ export class IngredientsService {
 
       const priceMap = new Map(latestPrices.map((p) => [p.productId, p]));
 
-      return uniqueMapped.map(({ product, source }) => {
+      return uniqueMapped.map(({ product, source, matchedIngredients }) => {
         const latestData = priceMap.get(product.id);
         return {
           ...product,
           source,
+          matchedIngredients,
           price: latestData ? latestData.latestPrice : product.price,
           currency: latestData ? latestData.currency : product.currency || "LKR",
           lastPriceUpdate: latestData ? latestData.lastUpdated : null,
@@ -457,127 +445,136 @@ export class IngredientsService {
       });
     };
 
-    const directProducts = await fetchProductsForIngredients([pgId]);
-    let productsWithLatestPrices = directProducts;
-    let resolvedFrom: { ingredient: string; relation: string } | undefined = undefined;
+    const nameLower = ing.name.trim().toLowerCase();
 
-    if (productsWithLatestPrices.length === 0) {
-      const descendantIds = await this.getDescendantIngredientIds(pgId);
-      if (descendantIds.length > 1) {
-        const varietyProducts = await fetchProductsForIngredients(descendantIds);
-        if (varietyProducts.length > 0) {
-          productsWithLatestPrices = varietyProducts;
-          resolvedFrom = {
-            ingredient: ing.name,
-            relation: "varieties",
+    // 1. Direct products for this ingredient
+    const directProducts = await fetchProductsForIngredients([pgId]);
+
+    // 2. Parent category check: Does this ingredient have children in partOf?
+    let childIngredients: { id: string; name: string }[] = [];
+    if (ing.varieties && ing.varieties.length > 0) {
+      childIngredients = await db
+        .select({ id: ingredients.id, name: ingredients.name })
+        .from(ingredients)
+        .where(sql`${ingredients.partOf} @> ARRAY[${nameLower}]::text[]`);
+    }
+
+    // If this ingredient is a parent with children that have products:
+    if (childIngredients.length > 0) {
+      const childIds = childIngredients.map((c) => c.id);
+      const childMap = new Map(childIngredients.map((c) => [c.id, c.name]));
+      const allIds = [pgId, ...childIds];
+      const allProducts = await fetchProductsForIngredients(allIds);
+
+      if (allProducts.length > 0) {
+        const categoryCounts = new Map<string, number>();
+        const directName = `${ing.name} (Direct / Generic)`;
+
+        const categorizedProducts = allProducts.map((p) => {
+          const matchedChildId = (p as any).matchedIngredients?.find((id: string) => childMap.has(id));
+          let categoryName = directName;
+          let categoryId = pgId;
+
+          if (matchedChildId) {
+            categoryName = childMap.get(matchedChildId)!;
+            categoryId = matchedChildId;
+          }
+
+          categoryCounts.set(categoryName, (categoryCounts.get(categoryName) || 0) + 1);
+
+          return {
+            ...p,
+            childIngredient: {
+              id: categoryId,
+              name: categoryName,
+            },
           };
-        }
+        });
+
+        const categories = [
+          { id: "all", name: "All", count: categorizedProducts.length },
+          ...Array.from(categoryCounts.entries())
+            .map(([name, count]) => ({
+              id: name,
+              name,
+              count,
+            }))
+            .sort((a, b) => b.count - a.count),
+        ];
+
+        return {
+          ingredient: ing.name,
+          ingredientId: ing.id,
+          products: categorizedProducts,
+          prices: categorizedProducts,
+          categories,
+        };
       }
     }
 
-    const BROAD_META_CATEGORIES = new Set([
-      "fruit",
-      "fruits",
-      "vegetable",
-      "vegetables",
-      "meat",
-      "meats",
-      "spice",
-      "spices",
-      "herb",
-      "herbs",
-      "dairy",
-      "leafy green",
-      "leafy greens",
-      "seafood",
-      "fish",
-      "poultry",
-      "grain",
-      "grains",
-      "root vegetable",
-      "root vegetables",
-      "tuber",
-      "tubers",
-      "juice",
-      "juices",
-      "fruit juice",
-      "vegetable juice",
-      "oil",
-      "oils",
-      "cooking oil",
-      "sauce",
-      "sauces",
-      "paste",
-      "pastes",
-      "powder",
-      "powders",
-      "extract",
-      "extracts",
-      "syrup",
-      "syrups",
-      "vinegar",
-      "vinegars",
-      "tea",
-      "teas",
-      "coffee",
-      "coffees",
-      "flour",
-      "flours",
-      "cheese",
-      "cheeses",
-      "seed",
-      "seeds",
-      "nut",
-      "nuts",
-      "bean",
-      "beans",
-      "legume",
-      "legumes",
-      "beverage",
-      "beverages",
-      "drink",
-      "drinks",
-      "sweetener",
-      "sweeteners",
-      "condiment",
-      "condiments",
-      "seasoning",
-      "seasonings",
-      "fat",
-      "fats",
-    ]);
+    // If viewing a child ingredient with direct products: return ONLY its direct products!
+    if (directProducts.length > 0) {
+      return {
+        ingredient: ing.name,
+        ingredientId: ing.id,
+        products: directProducts,
+        prices: directProducts,
+      };
+    }
 
-    if (productsWithLatestPrices.length === 0 && ing.partOf && ing.partOf.length > 0) {
-      for (const parentName of ing.partOf) {
-        if (!parentName) continue;
-        const cleanParent = parentName.trim().toLowerCase();
-        if (BROAD_META_CATEGORIES.has(cleanParent)) continue;
+    // 3. Fallback: Upward ancestor traversal (Immediate parent level 1 -> Grandparent level 2 -> ...)
+    let currentParents = (ing.partOf || []).map((p) => p.trim().toLowerCase()).filter(Boolean);
+    let level = 1;
+    const visitedParents = new Set<string>([nameLower]);
+
+    while (currentParents.length > 0 && level <= 4) {
+      const nextParents: string[] = [];
+
+      for (const parentName of currentParents) {
+        if (visitedParents.has(parentName)) continue;
+        visitedParents.add(parentName);
 
         const parentIng = await db.query.ingredients.findFirst({
-          where: sql`LOWER(${ingredients.name}) = ${cleanParent}`,
-          columns: { id: true, name: true },
+          where: sql`LOWER(${ingredients.name}) = ${parentName}`,
+          columns: { id: true, name: true, partOf: true },
         });
 
         if (parentIng) {
           const parentProducts = await fetchProductsForIngredients([parentIng.id]);
           if (parentProducts.length > 0) {
-            productsWithLatestPrices = parentProducts;
-            resolvedFrom = {
-              ingredient: parentIng.name,
-              relation: "part_of",
+            return {
+              ingredient: ing.name,
+              ingredientId: ing.id,
+              products: parentProducts,
+              prices: parentProducts,
+              resolvedFrom: {
+                ingredient: parentIng.name,
+                relation: level === 1 ? "parent" : "ancestor",
+                level,
+              },
             };
-            break;
+          }
+
+          if (parentIng.partOf) {
+            for (const gp of parentIng.partOf) {
+              const cleanGp = gp.trim().toLowerCase();
+              if (!visitedParents.has(cleanGp)) {
+                nextParents.push(cleanGp);
+              }
+            }
           }
         }
       }
+
+      currentParents = nextParents;
+      level++;
     }
 
     return {
       ingredient: ing.name,
       ingredientId: ing.id,
-      products: productsWithLatestPrices,
-      prices: productsWithLatestPrices,
-      ...(resolvedFrom && { resolvedFrom }),
+      products: [],
+      prices: [],
     };
   }
 
