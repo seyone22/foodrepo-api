@@ -1,4 +1,4 @@
-# 🥑 FoodRepo API (`foodrepo-api`)
+# FoodRepo API (`foodrepo-api`)
 
 [![NestJS](https://img.shields.io/badge/NestJS-11.0-E0234E?style=flat&logo=nestjs&logoColor=white)](https://nestjs.com/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-3178C6?style=flat&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
@@ -13,43 +13,39 @@
 
 It connects over **20,000+ culinary ingredients** with real-time supermarket product catalogs (Keells, Cargills Online, Glomark, SPAR), semantic vector embeddings, USDA FoodData Central nutritional profiles, and multi-retailer recipe costing algorithms. It also exposes a native **Model Context Protocol (MCP)** server with OAuth 2.0 authentication, enabling AI agents (ChatGPT, Claude Desktop, Google Antigravity, Gemini) to query ingredient intelligence and market prices.
 
----
+## Core Features
 
-## 🌟 Core Features
-
-- **🕸️ Canonical Ingredient Knowledge Graph**
+- **Canonical Ingredient Knowledge Graph**
   - Rich culinary taxonomy tracking relationships: `part_of` (botanical/structural components), `varieties` (cultivars/subtypes), `derivatives` (downstream extracts, oils, juices), `substitutes`, and `pairs_with`.
   - Multi-dimensional indexing across country of origin, culinary tradition, regional classifications, and organoleptic flavor profiles.
   - Hybrid search: PostgreSQL full-text fuzzy matching paired with 3072-dimensional vector semantic search via `pgvector` and Gemini embeddings.
 
-- **🛒 Supermarket Retail Pricing & Benchmarking**
+- **Supermarket Retail Pricing & Benchmarking**
   - Automated product catalog indexing across major Sri Lankan retail supermarket chains: **Keells**, **Cargills Online**, **Glomark**, and **SPAR**.
   - Historical price and stock tracking (`price_histories`, `stock_histories`) monitoring daily sales velocity, price shifts, and promotional discounts.
   - Unit price normalization (cost per 100g / 100ml) allowing accurate price-per-mass comparisons across different pack sizes and brands.
 
-- **🌳 Hierarchical Pricing & Ancestor Fallback**
+- **Hierarchical Pricing & Ancestor Fallback**
   - Intelligent multi-tier pricing resolution: Child ingredients resolve direct products first. If unstocked, the engine dynamically ascends the botanical taxonomy tree (`part_of` Level 1 immediate parent $\to$ Level 2+ grandparent) to surface relevant parent products.
   - Dynamic category pills and grouped descendant pricing when querying broader parent ingredients (e.g., querying *Pomegranate* aggregates distinct groups for *Pomegranate Seed*, *Pomegranate Juice*, etc.).
 
-- **🍲 Schema.org Recipe Costing & Ingestion**
+- **Schema.org Recipe Costing & Ingestion**
   - **Dual-Mode Recipe Costing**: Computes both **pro-rata consumed ingredient cost** (exact gram/milliliter fraction required) and **real-world supermarket basket checkout cost** (full retail pack sizes required).
   - Web Recipe Ingestion: Extracts and parses `Schema.org/Recipe` JSON-LD from external recipe URLs.
   - Camera & Text Parser: AI-powered parsing converts unstructured recipe text or OCR camera captures into structured `HowToSupply` items with standard metric quantities and units.
 
-- **🥗 USDA FoodData Central Nutrition**
+- **USDA FoodData Central Nutrition**
   - Directly linked to USDA FoodData Central (`fdc_id`) records, providing nutritional benchmarks for calories (kcal), macronutrients (protein, fat, carbohydrates), dietary fiber, sodium, and sugars.
 
-- **🤖 AI Enrichment & 4-Tier Media Waterfall**
+- **AI Enrichment & 4-Tier Media Waterfall**
   - Gemini Flash enrichment pipeline auto-populates missing cultural provenance, flavor profiles, phonetic pronunciations, and dietary compliance flags (Vegan, Halal, Gluten-Free).
   - 4-Tier Automated Image Waterfall searches and validates royalty-free culinary imagery across **Pexels**, **Unsplash**, **Wikimedia Commons**, and **Open Food Facts**.
 
-- **🔌 Built-in Model Context Protocol (MCP) Server**
+- **Built-in Model Context Protocol (MCP) Server**
   - Standards-compliant MCP endpoint (`/mcp` and `/api/v1/mcp`) with an integrated OAuth 2.0 authorization server (RFC 8414 `.well-known/oauth-authorization-server`).
   - Allows LLMs to autonomously perform semantic ingredient searches, fetch real-time grocery prices, inspect nutritional profiles, and propose ingredient contributions.
 
----
-
-## 🏗️ Architecture
+## Architecture
 
 ```mermaid
 flowchart TD
@@ -109,9 +105,7 @@ flowchart TD
     ING -.->|Nutrition Link| USDA_EXT
 ```
 
----
-
-## 📡 API Reference
+## API Reference
 
 Interactive OpenAPI / Swagger documentation is available locally at `http://localhost:4000/api/docs` or in production at `https://food.seyone.dev/api/docs`.
 
@@ -168,7 +162,7 @@ Interactive OpenAPI / Swagger documentation is available locally at `http://loca
 
 ---
 
-## 🗄️ Database Schema (`foodrepo`)
+## Database Schema (`foodrepo`)
 
 All tables are encapsulated within the custom `foodrepo` PostgreSQL schema managed via **Drizzle ORM**:
 
@@ -190,9 +184,7 @@ foodrepo
 - **Taxonomy Arrays**: GIN indexes on `part_of`, `aliases`, `cuisine`, and `country` for fast subset queries.
 - **Composite Unique Keys**: `(external_id, source_id)` on `products` and `(product_id, source_id)` on `mappings`.
 
----
-
-## 🤖 Model Context Protocol (MCP)
+## Model Context Protocol (MCP)
 
 FoodRepo API implements the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) specification, exposing tools directly to LLMs.
 
@@ -226,9 +218,7 @@ Add the following to your Claude Desktop configuration (`claude_desktop_config.j
 }
 ```
 
----
-
-## ⚙️ Environment Configuration
+## Environment Configuration
 
 Create a `.env` file in the root directory:
 
@@ -257,9 +247,7 @@ NEXT_PUBLIC_APP_URL=https://food.seyone.dev
 GITHUB_TOKEN=ghp_your_github_personal_access_token
 ```
 
----
-
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
 - **Node.js**: v20.x or higher
@@ -291,9 +279,9 @@ GITHUB_TOKEN=ghp_your_github_personal_access_token
    ```
 
    The server will start at:
-   - 🚀 API Base: `http://localhost:4000/api/v1`
-   - 📖 Swagger Docs: `http://localhost:4000/api/docs`
-   - 🔌 MCP Endpoint: `http://localhost:4000/mcp`
+   - API Base: `http://localhost:4000/api/v1`
+   - Swagger Docs: `http://localhost:4000/api/docs`
+   - MCP Endpoint: `http://localhost:4000/mcp`
 
 ### Build & Production
 
@@ -321,14 +309,10 @@ npm run lint
 npm run format
 ```
 
----
-
-## 🤝 Related Projects
+## Related Projects
 
 - **[ingredient-database-api](https://github.com/seyone22/ingredient-database-api)**: Next.js frontend web application consuming FoodRepo API.
 
----
-
-## 📄 License
+## License
 
 This project is licensed under the [UNLICENSED](LICENSE) agreement. All rights reserved.
