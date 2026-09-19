@@ -792,6 +792,59 @@ export async function evaluateRecipePricing(
         if (nonBrothWords.some((w) => lower.includes(w))) return false;
       }
 
+      // 18. Red Meat (beef, pork, mutton, lamb) & Ground/Minced Meat Fidelity
+      if (
+        clean.includes("beef") ||
+        clean.includes("pork") ||
+        clean.includes("mutton") ||
+        clean.includes("lamb") ||
+        clean.includes("ground meat") ||
+        clean.includes("mince")
+      ) {
+        // If specifically asking for ground / minced meat, product MUST be minced/ground meat
+        if (clean.includes("ground") || clean.includes("mince")) {
+          if (
+            !lower.includes("mince") &&
+            !lower.includes("ground") &&
+            !lower.includes("keema")
+          ) {
+            return false;
+          }
+        }
+
+        // If recipe specifies meat, exclude processed sausages, burger patties, meatballs, curries
+        const nonFreshMeatWords = [
+          "sausage",
+          "sausages",
+          "patty",
+          "patties",
+          "burger",
+          "meatball",
+          "meatballs",
+          "nugget",
+          "nuggets",
+          "heat & eat",
+          "ready to eat",
+          "rte",
+          "curry paste",
+          "curry mix",
+          "roll",
+          "ham",
+          "bacon",
+          "pet food",
+          "cube",
+          "soup cube",
+          "seasoning",
+        ];
+        if (
+          nonFreshMeatWords.some(
+            (w) => lower.includes(w) && !clean.includes(w),
+          )
+        ) {
+          return false;
+        }
+      }
+
       return true;
     };
 
@@ -957,6 +1010,44 @@ export async function evaluateRecipePricing(
         "cloves of garlic": [
           "garlic",
           "garlic clove",
+        ],
+        "ground beef": [
+          "beef mince",
+          "minced beef",
+          "ground beef",
+          "beef minced",
+        ],
+        "minced beef": [
+          "ground beef",
+          "beef mince",
+          "minced beef",
+          "beef minced",
+        ],
+        "beef mince": [
+          "ground beef",
+          "minced beef",
+          "beef mince",
+          "beef minced",
+        ],
+        "ground pork": [
+          "pork mince",
+          "minced pork",
+          "ground pork",
+        ],
+        "pork mince": [
+          "ground pork",
+          "minced pork",
+          "pork mince",
+        ],
+        "ground chicken": [
+          "chicken mince",
+          "minced chicken",
+          "ground chicken",
+        ],
+        "chicken mince": [
+          "ground chicken",
+          "minced chicken",
+          "chicken mince",
         ],
       };
 
