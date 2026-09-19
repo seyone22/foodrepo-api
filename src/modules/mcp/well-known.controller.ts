@@ -3,7 +3,7 @@ import { ApiOperation, ApiTags } from "@nestjs/swagger";
 import type { Request } from "express";
 
 @ApiTags("Discovery")
-@Controller(".well-known")
+@Controller([".well-known", "api/v1/.well-known"])
 export class WellKnownController {
   private getPublicOrigin(req: Request): string {
     const host = req.headers["x-forwarded-host"] || req.headers["host"];

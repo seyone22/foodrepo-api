@@ -20,9 +20,8 @@ async function bootstrap() {
   // Global API Prefix (excluding .well-known for standard discovery)
   app.setGlobalPrefix("api/v1", {
     exclude: [
-      ".well-known/oauth-authorization-server",
-      ".well-known/oauth-protected-resource",
-      ".well-known/openid-configuration",
+      ".well-known/(.*)",
+      "api/v1/.well-known/(.*)",
     ],
   });
 
