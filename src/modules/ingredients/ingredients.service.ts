@@ -488,24 +488,30 @@ export class IngredientsService {
           };
         });
 
-        const categories = [
-          { id: "all", name: "All", count: categorizedProducts.length },
-          ...Array.from(categoryCounts.entries())
-            .map(([name, count]) => ({
-              id: name,
-              name,
-              count,
-            }))
-            .sort((a, b) => b.count - a.count),
-        ];
+        const hasChildProducts = Array.from(categoryCounts.keys()).some(
+          (k) => k !== directName,
+        );
 
-        return {
-          ingredient: ing.name,
-          ingredientId: ing.id,
-          products: categorizedProducts,
-          prices: categorizedProducts,
-          categories,
-        };
+        if (hasChildProducts) {
+          const categories = [
+            { id: "all", name: "All", count: categorizedProducts.length },
+            ...Array.from(categoryCounts.entries())
+              .map(([name, count]) => ({
+                id: name,
+                name,
+                count,
+              }))
+              .sort((a, b) => b.count - a.count),
+          ];
+
+          return {
+            ingredient: ing.name,
+            ingredientId: ing.id,
+            products: categorizedProducts,
+            prices: categorizedProducts,
+            categories,
+          };
+        }
       }
     }
 
