@@ -7,6 +7,7 @@ import { MappingsModule } from "./modules/mappings/mappings.module";
 import { UsdaModule } from "./modules/usda/usda.module";
 import { AdminModule } from "./modules/admin/admin.module";
 import { RecipesModule } from "./modules/recipes/recipes.module";
+import { McpModule } from "./modules/mcp/mcp.module";
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { RecipesModule } from "./modules/recipes/recipes.module";
     UsdaModule,
     AdminModule,
     RecipesModule,
+    McpModule,
   ],
 })
 export class AppModule {}

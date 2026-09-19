@@ -6,17 +6,25 @@ import { ProblemDetailsFilter } from "./common/filters/problem-details.filter";
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
-  // Enable CORS for frontend clients
+  // Enable CORS for frontend clients & MCP callers
   app.enableCors({
-    origin: ["http://localhost:3000", "http://localhost:3001"],
-    credentials: true,
+    origin: "*",
+    methods: "GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS",
+    allowedHeaders:
+      "Authorization, Content-Type, Mcp-Method, Mcp-Name, Mcp-Session-Id",
   });
 
   // Global RFC 7807 problem details filter
   app.useGlobalFilters(new ProblemDetailsFilter());
 
-  // Global API Prefix
-  app.setGlobalPrefix("api/v1");
+  // Global API Prefix (excluding .well-known for standard discovery)
+  app.setGlobalPrefix("api/v1", {
+    exclude: [
+      ".well-known/oauth-authorization-server",
+      ".well-known/oauth-protected-resource",
+      ".well-known/openid-configuration",
+    ],
+  });
 
   // OpenAPI / Swagger Documentation
   const config = new DocumentBuilder()
