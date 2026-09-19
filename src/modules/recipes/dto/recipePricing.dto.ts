@@ -48,6 +48,17 @@ export interface Offer {
   basketCost?: number;
 }
 
+export interface SupplyFulfillment {
+  strategy: "direct" | "derivative" | "child" | "parent" | "ancestor";
+  sourceIngredient?: string;
+  sourceIngredientId?: string;
+  process?: string | null;
+  yieldRatio?: number | null;
+  lossRatio?: number | null;
+  adjustedQuantity?: QuantitativeValue;
+  note?: string;
+}
+
 export interface HowToSupply {
   "@type"?: "HowToSupply";
   name: string;
@@ -56,6 +67,7 @@ export interface HowToSupply {
   offers?: Offer[];
   status?: "priced" | "unpriced" | "excluded";
   note?: string;
+  fulfillment?: SupplyFulfillment;
 }
 
 export interface AggregateOffer {

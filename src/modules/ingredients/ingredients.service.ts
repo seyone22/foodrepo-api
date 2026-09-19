@@ -23,6 +23,7 @@ import {
 } from "drizzle-orm";
 import { toPgId } from "@/common/utils/uuid.util";
 import { ImageWaterfallService } from "./image-waterfall.service";
+import { GraphTraversalService } from "../graph/graph-traversal.service";
 
 type IngredientRow = typeof ingredients.$inferSelect;
 type ProductRow = typeof products.$inferSelect;
@@ -82,7 +83,10 @@ const ingredientColumns = {
 export class IngredientsService {
   private ai: GoogleGenAI | null = null;
 
-  constructor(private readonly imageWaterfallService: ImageWaterfallService) {
+  constructor(
+    private readonly imageWaterfallService: ImageWaterfallService,
+    private readonly graphTraversalService: GraphTraversalService,
+  ) {
     const apiKey = process.env.GEMINI_API_KEY;
     if (apiKey) {
       this.ai = new GoogleGenAI({ apiKey });
@@ -386,204 +390,44 @@ export class IngredientsService {
   }
 
   async getIngredientPrices(ingredientId: string) {
-    const pgId = toPgId(ingredientId);
+    let pgId: string;
+    try {
+      pgId = toPgId(ingredientId);
+    } catch {
+      return null;
+    }
 
     const ing = await db.query.ingredients.findFirst({
       where: eq(ingredients.id, pgId),
-      columns: { id: true, name: true, partOf: true, varieties: true },
+      columns: { id: true, name: true },
     });
 
     if (!ing) return null;
 
-    const fetchProductsForIngredients = async (targetPgIds: string[]) => {
-      if (!targetPgIds || targetPgIds.length === 0) return [];
-
-      const mapped = await db
-        .select({
-          product: products,
-          source: priceSources,
-          matchedIngredients: mappings.matchedIngredients,
-        })
-        .from(mappings)
-        .innerJoin(products, eq(products.id, mappings.productId))
-        .leftJoin(priceSources, eq(priceSources.id, products.sourceId))
-        .where(
-          sql`${mappings.matchedIngredients} && ARRAY[${sql.join(
-            targetPgIds.map((id) => sql`${id}::uuid`),
-            sql`, `,
-          )}]`,
-        );
-
-      if (mapped.length === 0) return [];
-
-      const uniqueMappedMap = new Map<string, { product: ProductRow; source: any; matchedIngredients: string[] | null }>();
-      for (const item of mapped) {
-        if (!uniqueMappedMap.has(item.product.id)) {
-          uniqueMappedMap.set(item.product.id, item);
-        }
-      }
-      const uniqueMapped = Array.from(uniqueMappedMap.values());
-      const productIds = uniqueMapped.map((m) => m.product.id);
-
-      const latestPrices = await db
-        .selectDistinctOn([priceHistories.productId], {
-          productId: priceHistories.productId,
-          latestPrice: priceHistories.price,
-          currency: priceHistories.currency,
-          lastUpdated: priceHistories.timestamp,
-        })
-        .from(priceHistories)
-        .where(inArray(priceHistories.productId, productIds))
-        .orderBy(priceHistories.productId, desc(priceHistories.timestamp));
-
-      const priceMap = new Map(latestPrices.map((p) => [p.productId, p]));
-
-      return uniqueMapped.map(({ product, source, matchedIngredients }) => {
-        const latestData = priceMap.get(product.id);
-        return {
-          ...product,
-          source,
-          matchedIngredients,
-          price: latestData ? latestData.latestPrice : product.price,
-          currency: latestData ? latestData.currency : product.currency || "LKR",
-          lastPriceUpdate: latestData ? latestData.lastUpdated : null,
-        };
-      });
-    };
-
-    const nameLower = ing.name.trim().toLowerCase();
-
-    // 1. Direct products for this ingredient
-    const directProducts = await fetchProductsForIngredients([pgId]);
-
-    // 2. Parent / Component check: Find ingredients where partOf contains this ingredient
-    const childIngredients = await db
-      .select({ id: ingredients.id, name: ingredients.name })
-      .from(ingredients)
-      .where(sql`${ingredients.partOf} @> ARRAY[${nameLower}]::text[]`);
-
-    // If this ingredient is a parent with children that have products:
-    if (childIngredients.length > 0) {
-      const childIds = childIngredients.map((c) => c.id);
-      const childMap = new Map(childIngredients.map((c) => [c.id, c.name]));
-      const allIds = [pgId, ...childIds];
-      const allProducts = await fetchProductsForIngredients(allIds);
-
-      if (allProducts.length > 0) {
-        const categoryCounts = new Map<string, number>();
-        const directName = `${ing.name} (Direct / Generic)`;
-
-        const categorizedProducts = allProducts.map((p) => {
-          const matchedChildId = (p as any).matchedIngredients?.find((id: string) => childMap.has(id));
-          let categoryName = directName;
-          let categoryId = pgId;
-
-          if (matchedChildId) {
-            categoryName = childMap.get(matchedChildId)!;
-            categoryId = matchedChildId;
-          }
-
-          categoryCounts.set(categoryName, (categoryCounts.get(categoryName) || 0) + 1);
-
-          return {
-            ...p,
-            childIngredient: {
-              id: categoryId,
-              name: categoryName,
-            },
-          };
-        });
-
-        const hasChildProducts = Array.from(categoryCounts.keys()).some(
-          (k) => k !== directName,
-        );
-
-        if (hasChildProducts) {
-          const categories = [
-            { id: "all", name: "All", count: categorizedProducts.length },
-            ...Array.from(categoryCounts.entries())
-              .map(([name, count]) => ({
-                id: name,
-                name,
-                count,
-              }))
-              .sort((a, b) => b.count - a.count),
-          ];
-
-          return {
-            ingredient: ing.name,
-            ingredientId: ing.id,
-            products: categorizedProducts,
-            prices: categorizedProducts,
-            categories,
-          };
-        }
-      }
-    }
-
-    // If viewing a child ingredient with direct products: return ONLY its direct products!
-    if (directProducts.length > 0) {
+    const resolution = await this.graphTraversalService.resolveByIngredientId(pgId);
+    if (!resolution) {
       return {
         ingredient: ing.name,
         ingredientId: ing.id,
-        products: directProducts,
-        prices: directProducts,
+        products: [],
+        prices: [],
       };
-    }
-
-    // 3. Fallback: Upward ancestor traversal (Immediate parent level 1 -> Grandparent level 2 -> ...)
-    let currentParents = (ing.partOf || []).map((p) => p.trim().toLowerCase()).filter(Boolean);
-    let level = 1;
-    const visitedParents = new Set<string>([nameLower]);
-
-    while (currentParents.length > 0 && level <= 4) {
-      const nextParents: string[] = [];
-
-      for (const parentName of currentParents) {
-        if (visitedParents.has(parentName)) continue;
-        visitedParents.add(parentName);
-
-        const parentIng = await db.query.ingredients.findFirst({
-          where: sql`LOWER(${ingredients.name}) = ${parentName}`,
-          columns: { id: true, name: true, partOf: true },
-        });
-
-        if (parentIng) {
-          const parentProducts = await fetchProductsForIngredients([parentIng.id]);
-          if (parentProducts.length > 0) {
-            return {
-              ingredient: ing.name,
-              ingredientId: ing.id,
-              products: parentProducts,
-              prices: parentProducts,
-              resolvedFrom: {
-                ingredient: parentIng.name,
-                relation: level === 1 ? "parent" : "ancestor",
-                level,
-              },
-            };
-          }
-
-          if (parentIng.partOf) {
-            for (const gp of parentIng.partOf) {
-              const cleanGp = gp.trim().toLowerCase();
-              if (!visitedParents.has(cleanGp)) {
-                nextParents.push(cleanGp);
-              }
-            }
-          }
-        }
-      }
-
-      currentParents = nextParents;
-      level++;
     }
 
     return {
       ingredient: ing.name,
       ingredientId: ing.id,
-      products: [],
-      prices: [],
+      products: resolution.products,
+      prices: resolution.products,
+      categories: resolution.categories,
+      resolvedFrom: resolution.sourceIngredient
+        ? {
+            ingredient: resolution.sourceIngredient.name,
+            relation: resolution.relation,
+            level: resolution.level,
+            derivative: resolution.derivative,
+          }
+        : undefined,
     };
   }
 

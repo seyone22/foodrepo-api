@@ -18,6 +18,10 @@ import {
   products,
 } from "@/database/schema";
 import { toPgId } from "@/common/utils/uuid.util";
+import {
+  GraphTraversalService,
+  type TraversalResolution,
+} from "../graph/graph-traversal.service";
 
 // ---------------------------------------------------------------------------
 // Unit Conversion Helpers
@@ -75,6 +79,20 @@ function toBaseUnit(qty: number, rawUnit?: string): StandardizedQty {
   }
   if (["gallon", "gallons", "gal"].includes(u)) {
     return { qty: qty * 3785.41, unit: "ml" };
+  }
+
+  // Culinary packaging containers -> grams
+  if (["can", "cans", "tin", "tins"].includes(u)) {
+    return { qty: qty * 425, unit: "g" };
+  }
+  if (["bunch", "bunches"].includes(u)) {
+    return { qty: qty * 150, unit: "g" };
+  }
+  if (["pinch", "pinches", "dash", "dashes"].includes(u)) {
+    return { qty: qty * 1, unit: "g" };
+  }
+  if (["packet", "packets", "pack", "packs", "pkg"].includes(u)) {
+    return { qty: qty * 250, unit: "g" };
   }
 
   // Count / discrete units
@@ -568,35 +586,34 @@ export async function evaluateRecipePricing(
       return true;
     };
 
+    const graphTraversal = new GraphTraversalService();
+    let traversal: TraversalResolution | null = null;
+    let effectiveQty = scaledQty;
+    let effectiveUnit = unitText;
+
     // Stage 1: Explicit identifier provided
     if (rawSupply.identifier) {
       try {
-        const pgId = toPgId(rawSupply.identifier);
-        const existing = await db.query.ingredients.findFirst({
-          where: eq(ingredients.id, pgId),
-          columns: { id: true, name: true },
+        traversal = await graphTraversal.resolveByIngredientId(rawSupply.identifier, {
+          allowedSources: allowedSources || undefined,
         });
-        if (existing) {
-          resolvedId = existing.id;
-          baseSupply.identifier = existing.id;
-          const rows = await db
-            .select({ product: products, source: priceSources })
-            .from(mappings)
-            .innerJoin(products, eq(products.id, mappings.productId))
-            .leftJoin(priceSources, eq(priceSources.id, products.sourceId))
-            .where(
-              sql`${mappings.matchedIngredients} @> ARRAY[${pgId}]::uuid[]`,
-            );
-          mappedData = rows.filter((r) =>
-            isFoodProduct(r.product.name, r.product.categoryPath),
+        if (traversal && traversal.products.length > 0) {
+          resolvedId = traversal.ingredientId;
+          baseSupply.identifier = resolvedId;
+          const validFoodProducts = traversal.products.filter((p) =>
+            isFoodProduct(p.name, p.categoryPath),
           );
+          mappedData = validFoodProducts.map((p) => ({
+            product: p,
+            source: p.source as typeof priceSources.$inferSelect | null,
+          }));
         }
       } catch {
         // Fallback to name resolution
       }
     }
 
-    // Stage 2: Resolve via culinary synonyms & mapped ingredients
+    // Stage 2: Centralized Graph Traversal (Direct -> Aliases -> Derivatives -> Ancestor)
     if (mappedData.length === 0 && supplyName) {
       const SYNONYMS: Record<string, string[]> = {
         "graham cracker crumbs": [
@@ -740,38 +757,87 @@ export async function evaluateRecipePricing(
         ),
       ];
 
-      for (const cand of uniqueCandidates) {
-        // Query ingredient that has mapped products (checking name and aliases)
-        const candidateRows = await db
-          .select({
-            product: products,
-            source: priceSources,
-            ingredientId: sql<string>`${ingredients.id}::text`,
-            ingredientName: ingredients.name,
-          })
-          .from(ingredients)
-          .innerJoin(
-            mappings,
-            sql`${ingredients.id} = ANY(${mappings.matchedIngredients})`,
-          )
-          .innerJoin(products, eq(products.id, mappings.productId))
-          .leftJoin(priceSources, eq(priceSources.id, products.sourceId))
-          .where(
-            sql`lower(${ingredients.name}) = ${cand} OR ${cand} = ANY(SELECT lower(unnest(${ingredients.aliases})))`,
-          )
-          .limit(20);
+      // 1. Primary traversal on clean supply name
+      traversal = await graphTraversal.resolveByNameOrQuery(clean, {
+        allowedSources: allowedSources || undefined,
+      });
 
-        const validFoodRows = candidateRows.filter((r) =>
-          isFoodProduct(r.product.name, r.product.categoryPath),
+      // 2. Synonyms traversal
+      if ((!traversal || traversal.products.length === 0) && SYNONYMS[clean]) {
+        for (const syn of SYNONYMS[clean]) {
+          traversal = await graphTraversal.resolveByNameOrQuery(syn, {
+            allowedSources: allowedSources || undefined,
+          });
+          if (traversal && traversal.products.length > 0) break;
+        }
+      }
+
+      // 3. Fallback candidate phrases traversal
+      if (!traversal || traversal.products.length === 0) {
+        for (const cand of uniqueCandidates) {
+          if (cand === clean) continue;
+          traversal = await graphTraversal.resolveByNameOrQuery(cand, {
+            allowedSources: allowedSources || undefined,
+          });
+          if (traversal && traversal.products.length > 0) break;
+        }
+      }
+
+      if (traversal && traversal.products.length > 0) {
+        resolvedId = traversal.ingredientId;
+        baseSupply.identifier = resolvedId;
+
+        const validFoodProducts = traversal.products.filter((p) =>
+          isFoodProduct(p.name, p.categoryPath),
         );
-        if (validFoodRows.length > 0) {
-          mappedData = validFoodRows.map((r) => ({
-            product: r.product,
-            source: r.source,
-          }));
-          resolvedId = validFoodRows[0].ingredientId;
-          baseSupply.identifier = resolvedId;
-          break;
+
+        mappedData = validFoodProducts.map((p) => ({
+          product: p,
+          source: p.source as typeof priceSources.$inferSelect | null,
+        }));
+
+        if (traversal.relation === "derivative") {
+          const yieldRatio = traversal.derivative?.yieldRatio;
+          const reqBase = toBaseUnit(scaledQty, unitText);
+          const scaleRes = graphTraversal.scaleDerivativeQuantity(
+            reqBase.qty,
+            reqBase.unit,
+            yieldRatio,
+          );
+          effectiveQty = scaleRes.scaledQuantity;
+          effectiveUnit = reqBase.unit;
+
+          baseSupply.fulfillment = {
+            strategy: "derivative",
+            sourceIngredient:
+              traversal.sourceIngredient?.name || traversal.ingredientName,
+            sourceIngredientId:
+              traversal.sourceIngredient?.id || traversal.ingredientId,
+            process: traversal.derivative?.process,
+            yieldRatio: traversal.derivative?.yieldRatio,
+            lossRatio: traversal.derivative?.lossRatio,
+            adjustedQuantity: {
+              value: scaleRes.scaledQuantity,
+              unitText: reqBase.unit,
+            },
+            note: scaleRes.note,
+          };
+          baseSupply.note = scaleRes.note;
+        } else if (
+          traversal.relation === "parent" ||
+          traversal.relation === "ancestor"
+        ) {
+          baseSupply.fulfillment = {
+            strategy: traversal.relation,
+            sourceIngredient:
+              traversal.sourceIngredient?.name || traversal.ingredientName,
+            sourceIngredientId:
+              traversal.sourceIngredient?.id || traversal.ingredientId,
+            note: `Fulfilled via ${traversal.relation} ingredient ${
+              traversal.sourceIngredient?.name || traversal.ingredientName
+            }`,
+          };
+          baseSupply.note = baseSupply.fulfillment.note;
         }
       }
 
@@ -850,7 +916,7 @@ export async function evaluateRecipePricing(
     const priceMap = new Map(latestPrices.map((p) => [p.productId, p]));
 
     // Compute costs for each product offer
-    const ingredientReqBase = toBaseUnit(scaledQty, unitText);
+    const ingredientReqBase = toBaseUnit(effectiveQty, effectiveUnit);
     const candidateOffers: Offer[] = [];
 
     for (const { product, source } of filteredMapped) {
