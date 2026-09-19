@@ -50,7 +50,7 @@ export interface SearchOptions {
   includeProducts?: boolean;
 }
 
-const EMBEDDING_DIMENSIONS = 1536;
+const EMBEDDING_DIMENSIONS = 3072;
 const EMBEDDING_MODEL = "gemini-embedding-001";
 
 const ingredientColumns = {
@@ -98,7 +98,13 @@ export class IngredientsService {
       contents: text,
       config: { outputDimensionality: EMBEDDING_DIMENSIONS },
     });
-    return response.embeddings![0].values as number[];
+    const embeddingValues =
+      (response as any).embeddings?.[0]?.values ||
+      (response as any).embedding?.values;
+    if (!embeddingValues) {
+      throw new Error("Failed to extract embedding values from Gemini API response");
+    }
+    return embeddingValues as number[];
   }
 
   async getDescendantIngredientIds(rootId: string): Promise<string[]> {
@@ -594,7 +600,15 @@ export class IngredientsService {
   async addIngredient(data: any) {
     const name = data.name?.trim();
     if (!name) throw new Error("Ingredient name is required");
-    const embedding = await this.embedText(name);
+
+    let embedding: number[] | null = null;
+    try {
+      embedding = await this.embedText(name);
+    } catch (err: any) {
+      console.warn(`Embedding generation skipped for "${name}":`, err?.message || err);
+    }
+
+    const photoUrl = data.photo?.trim();
 
     const [created] = await db
       .insert(ingredients)
@@ -611,14 +625,24 @@ export class IngredientsService {
           ? data.dietary_flags
           : [],
         provenance: data.provenance?.trim() || "MISSING",
-        comment: data.comment?.trim(),
-        pronunciation: data.pronunciation?.trim(),
-        image: data.photo?.trim()
-          ? { url: data.photo.trim(), missing: false }
-          : { missing: true },
+        comment: data.comment?.trim() || null,
+        pronunciation: data.pronunciation?.trim() || null,
+        image: photoUrl ? { url: photoUrl, missing: false } : { missing: true },
+        derivatives: Array.isArray(data.derivatives) ? data.derivatives : [],
         embedding,
       })
       .returning();
+
+    if (created?.id) {
+      this.enhanceIngredients([created.id]).catch((err) =>
+        console.warn(`Background AI culinary enrichment failed for "${name}":`, err?.message || err)
+      );
+      if (!photoUrl) {
+        this.enhanceIngredientImage(created.id).catch((err) =>
+          console.warn(`Background image waterfall failed for "${name}":`, err?.message || err)
+        );
+      }
+    }
 
     return created;
   }
@@ -739,6 +763,11 @@ Return JSON with:
 - country, cuisine, region, flavorProfile, dietaryFlags as arrays of strings
 - comment: a string description of what the ingredient is, how it's used in cooking, where it's from, how it can be stored
 - pronunciation: standard format for pronunciation
+- derivatives: array of derivative items produced from this ingredient, where each object has:
+  * name: name of derivative (e.g. "pumpkin puree")
+  * process: culinary transformation method (e.g. "steamed, peeled, and pureed")
+  * yieldRatio: numeric ratio (0 to 1) of derivative mass to raw base mass (e.g. 0.70)
+  * lossRatio: numeric ratio (0 to 1) of waste/moisture lost (e.g. 0.30)
 Use valid JSON only.`;
 
         const response = await ai.models.generateContent({
@@ -752,6 +781,48 @@ Use valid JSON only.`;
         if (response.text) {
           const enriched = JSON.parse(response.text);
           enrichedMap[ing.id] = enriched;
+
+          let updatedDerivatives = Array.isArray(ing.derivatives)
+            ? [...(ing.derivatives as any[])]
+            : [];
+          if (
+            Array.isArray(enriched.derivatives) &&
+            enriched.derivatives.length > 0
+          ) {
+            const mapByName = new Map<string, any>();
+            for (const d of updatedDerivatives) {
+              const dName = (
+                typeof d === "string" ? d : d?.name || ""
+              )
+                .toLowerCase()
+                .trim();
+              if (dName)
+                mapByName.set(dName, typeof d === "string" ? { name: d } : d);
+            }
+            for (const d of enriched.derivatives) {
+              const rawName = (
+                typeof d === "string" ? d : d?.name || ""
+              ).trim();
+              if (!rawName) continue;
+              const key = rawName.toLowerCase();
+              const existing = mapByName.get(key);
+              const structured = typeof d === "string" ? { name: rawName } : d;
+              mapByName.set(key, {
+                name: rawName,
+                targetId: structured.targetId ?? existing?.targetId ?? null,
+                process: structured.process ?? existing?.process ?? null,
+                yieldRatio:
+                  typeof structured.yieldRatio === "number"
+                    ? structured.yieldRatio
+                    : existing?.yieldRatio ?? null,
+                lossRatio:
+                  typeof structured.lossRatio === "number"
+                    ? structured.lossRatio
+                    : existing?.lossRatio ?? null,
+              });
+            }
+            updatedDerivatives = Array.from(mapByName.values());
+          }
 
           const updateData: any = {
             aliases: mergeArrays(ing.aliases || [], enriched.aliases || []),
@@ -770,6 +841,7 @@ Use valid JSON only.`;
               ing.substitutes || [],
               enriched.substitutes || [],
             ),
+            derivatives: updatedDerivatives,
             comment: enriched.comment || ing.comment || null,
             pronunciation: enriched.pronunciation || ing.pronunciation || null,
             lastModified: new Date(),

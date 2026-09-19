@@ -29,6 +29,25 @@ export class SearchIngredientsQueryDto extends createZodDto(
   searchIngredientsQuerySchema,
 ) {}
 
+export const derivativeItemSchema = z.object({
+  name: z.string().min(1),
+  targetId: z.string().uuid().optional().nullable(),
+  process: z.string().optional().nullable(),
+  yieldRatio: z.number().positive().optional().nullable(),
+  lossRatio: z.number().nonnegative().optional().nullable(),
+});
+
+export const derivativeInputSchema = z.union([
+  derivativeItemSchema,
+  z.string().min(1).transform((name) => ({
+    name,
+    targetId: null,
+    process: null,
+    yieldRatio: null,
+    lossRatio: null,
+  })),
+]);
+
 export const createIngredientSchema = z.object({
   name: z.string().min(1),
   aliases: z.array(z.string()).optional().default([]),
@@ -41,6 +60,7 @@ export const createIngredientSchema = z.object({
   comment: z.string().optional(),
   pronunciation: z.string().optional(),
   photo: z.string().optional(),
+  derivatives: z.array(derivativeInputSchema).optional().default([]),
 });
 
 export class CreateIngredientDto extends createZodDto(createIngredientSchema) {}

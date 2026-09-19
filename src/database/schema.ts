@@ -74,6 +74,14 @@ export const usdaFoods = foodrepo.table("usda_foods", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
+export interface DerivativeItem {
+  name: string;
+  targetId?: string | null;
+  process?: string | null;
+  yieldRatio?: number | null;
+  lossRatio?: number | null;
+}
+
 export const ingredients = foodrepo.table("ingredients", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull().unique(),
@@ -106,7 +114,9 @@ export const ingredients = foodrepo.table("ingredients", {
     .default({ missing: true }),
 
   partOf: text("part_of").array(),
-  derivatives: text("derivatives").array(),
+  derivatives: jsonb("derivatives")
+    .$type<DerivativeItem[]>()
+    .default([]),
   varieties: text("varieties").array(),
   usedIn: text("used_in").array(),
   substitutes: text("substitutes").array(),
@@ -241,7 +251,7 @@ export const stockHistories = foodrepo.table(
 export const queryEmbeddings = foodrepo.table("query_embeddings", {
   id: uuid("id").primaryKey().defaultRandom(),
   query: text("query").notNull().unique(),
-  embedding: vector("embedding", { dimensions: 1536 }).notNull(),
+  embedding: vector("embedding", { dimensions: 3072 }).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
