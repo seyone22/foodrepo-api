@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -13,6 +14,7 @@ import {
 } from "@nestjs/common";
 import { ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags } from "@nestjs/swagger";
 import { ZodValidationPipe } from "nestjs-zod";
+import { RecipeAiService } from "../recipes/recipe-ai.service";
 import {
   BulkIngredientsDto,
   bulkIngredientsSchema,
@@ -28,7 +30,10 @@ import { IngredientsService } from "./ingredients.service";
 @ApiTags("Ingredients")
 @Controller("ingredients")
 export class IngredientsController {
-  constructor(private readonly ingredientsService: IngredientsService) {}
+  constructor(
+    private readonly ingredientsService: IngredientsService,
+    private readonly aiService: RecipeAiService,
+  ) {}
 
   @Get()
   @HttpCode(HttpStatus.OK)
@@ -210,5 +215,35 @@ export class IngredientsController {
     }
 
     return data;
+  }
+
+  @Post("parse")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: "Parse raw ingredient lines into structured quantities and units" })
+  async parseIngredients(@Body() body: { ingredients?: string[] }) {
+    const ingredients = body.ingredients;
+    if (!ingredients || !Array.isArray(ingredients)) {
+      throw new BadRequestException("Missing or invalid 'ingredients' array.");
+    }
+    return this.aiService.parseIngredients(ingredients);
+  }
+
+  @Post("parse-recipe")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: "Convert raw recipe text into a valid Schema.org Recipe JSON-LD" })
+  async parseCameraRecipe(@Body() body: { rawText?: string }) {
+    const rawText = body.rawText;
+    if (!rawText || typeof rawText !== "string" || !rawText.trim()) {
+      throw new BadRequestException("Missing or invalid 'rawText' field.");
+    }
+    const recipeJson = await this.aiService.parseCameraRecipeToJsonLd(rawText);
+    if (!recipeJson) {
+      throw new BadRequestException("Failed to parse recipe text.");
+    }
+    try {
+      return JSON.parse(recipeJson);
+    } catch {
+      return recipeJson;
+    }
   }
 }

@@ -112,4 +112,96 @@ Return strictly a JSON array of objects:
       }));
     }
   }
+
+  async parseIngredients(ingredientList: string[]): Promise<
+    Array<{
+      ingredient: string;
+      quantity: number | null;
+      unit: string | null;
+      notes: string | null;
+    }>
+  > {
+    if (!ingredientList.length) return [];
+    if (!this.ai) {
+      return ingredientList.map((line) => ({
+        ingredient: line,
+        quantity: null,
+        unit: null,
+        notes: null,
+      }));
+    }
+
+    const prompt = `Extract structured data from this ingredient list. Return a JSON Array of objects.
+Fields: "ingredient" (string), "quantity" (number, null if missing), "unit" (string, null if missing), "notes" (string, null if missing).
+
+Ingredients:
+${ingredientList.join("\n")}`;
+
+    try {
+      const response = await this.ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                ingredient: { type: "string" },
+                quantity: { type: "number", nullable: true },
+                unit: { type: "string", nullable: true },
+                notes: { type: "string", nullable: true },
+              },
+              required: ["ingredient"],
+            },
+          },
+        },
+      });
+
+      if (response.text) {
+        return JSON.parse(response.text);
+      }
+      return [];
+    } catch (err: any) {
+      console.error("Failed to parse ingredients using Gemini:", err.message || err);
+      throw err;
+    }
+  }
+
+  async parseCameraRecipeToJsonLd(rawText: string): Promise<string | null> {
+    if (!this.ai) {
+      console.warn("GEMINI_API_KEY is not defined in environment");
+      return null;
+    }
+
+    const prompt = `You are a recipe parsing assistant. Convert the raw text below into a valid JSON-LD Recipe object (https://schema.org/Recipe).
+Strict Requirements:
+- Use ISO 8601 durations for times (e.g., "PT30M").
+- Do not include explanations or markdown.
+- Output raw JSON only.
+
+Raw Text:
+${rawText}`;
+
+    try {
+      const response = await this.ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: prompt,
+      });
+
+      if (response.text) {
+        return response.text
+          .trim()
+          .replace(/^```json\s*/i, "")
+          .replace(/^```\s*/, "")
+          .replace(/```$/, "")
+          .trim();
+      }
+      return null;
+    } catch (err: any) {
+      console.error("Failed to parse camera recipe using Gemini:", err.message || err);
+      return null;
+    }
+  }
 }
