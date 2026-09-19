@@ -145,4 +145,38 @@ export class MappingsService {
       throw err;
     }
   }
+
+  async unlinkProduct(productId: string, ingredientId: string) {
+    const pgProductId = toPgId(productId);
+    const pgIngredientId = toPgId(ingredientId);
+
+    const [existing] = await db
+      .select({
+        id: mappings.id,
+        matchedIngredients: mappings.matchedIngredients,
+      })
+      .from(mappings)
+      .where(eq(mappings.productId, pgProductId))
+      .limit(1);
+
+    if (!existing) {
+      return null;
+    }
+
+    const filtered = (existing.matchedIngredients || []).filter(
+      (id) => id !== pgIngredientId,
+    );
+
+    const [updated] = await db
+      .update(mappings)
+      .set({
+        matchedIngredients: filtered,
+        notes: "Unlinked via UI Admin Tool",
+        updatedAt: new Date(),
+      })
+      .where(eq(mappings.id, existing.id))
+      .returning();
+
+    return updated;
+  }
 }

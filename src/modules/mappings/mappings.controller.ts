@@ -33,4 +33,21 @@ export class MappingsController {
       mapping: result,
     };
   }
+
+  @Post("unlink")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: "Unlink a product from an ingredient" })
+  @ApiResponse({ status: 200, description: "Product unlinked" })
+  async unlinkProduct(
+    @Body() body: { productId: string; ingredientId: string },
+  ) {
+    const result = await this.mappingsService.unlinkProduct(
+      body.productId,
+      body.ingredientId,
+    );
+    return {
+      message: "Product unlinked",
+      mapping: result,
+    };
+  }
 }
