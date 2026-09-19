@@ -121,6 +121,7 @@ export const ingredients = foodrepo.table("ingredients", {
   usedIn: text("used_in").array(),
   substitutes: text("substitutes").array(),
   pairsWith: text("pairs_with").array(),
+  density: doublePrecision("density"),
 
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),

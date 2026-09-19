@@ -42,6 +42,7 @@ export interface TraversalResolution {
     name: string;
   };
   derivative?: DerivativeMatchMetadata;
+  density?: number;
   products: TraversalProduct[];
   categories?: Array<{ id: string; name: string; count: number }>;
 }
@@ -197,6 +198,67 @@ export class GraphTraversalService {
   }
 
   /**
+   * Resolves culinary density (g/ml) for an ingredient, traversing up
+   * the 'partOf' hierarchy if not set directly, with fallback to 1.0.
+   */
+  async resolveIngredientDensity(
+    ingredientId: string,
+    initialPartOf?: string[] | null,
+    initialDensity?: number | null,
+  ): Promise<number> {
+    if (initialDensity != null && initialDensity > 0) {
+      return initialDensity;
+    }
+
+    let queue: string[] = [];
+    if (initialPartOf && Array.isArray(initialPartOf)) {
+      queue = initialPartOf.map((p) => p.trim().toLowerCase()).filter(Boolean);
+    } else {
+      const ing = await db.query.ingredients.findFirst({
+        where: eq(ingredients.id, ingredientId),
+        columns: { partOf: true, density: true },
+      });
+      if (ing?.density != null && ing.density > 0) {
+        return ing.density;
+      }
+      if (ing?.partOf && Array.isArray(ing.partOf)) {
+        queue = ing.partOf.map((p) => p.trim().toLowerCase()).filter(Boolean);
+      }
+    }
+
+    const visited = new Set<string>();
+    while (queue.length > 0) {
+      const nextQueue: string[] = [];
+      for (const parentName of queue) {
+        if (visited.has(parentName)) continue;
+        visited.add(parentName);
+
+        const parent = await db.query.ingredients.findFirst({
+          where: sql`LOWER(${ingredients.name}) = ${parentName}`,
+          columns: { density: true, partOf: true },
+        });
+
+        if (parent) {
+          if (parent.density != null && parent.density > 0) {
+            return parent.density;
+          }
+          if (parent.partOf && Array.isArray(parent.partOf)) {
+            for (const p of parent.partOf) {
+              const pClean = p.trim().toLowerCase();
+              if (pClean && !visited.has(pClean)) {
+                nextQueue.push(pClean);
+              }
+            }
+          }
+        }
+      }
+      queue = nextQueue;
+    }
+
+    return 1.0;
+  }
+
+  /**
    * Resolve products and graph relationship starting from a known ingredient UUID.
    */
   async resolveByIngredientId(
@@ -212,10 +274,16 @@ export class GraphTraversalService {
 
     const ing = await db.query.ingredients.findFirst({
       where: eq(ingredients.id, pgId),
-      columns: { id: true, name: true, partOf: true, derivatives: true },
+      columns: { id: true, name: true, partOf: true, derivatives: true, density: true },
     });
 
     if (!ing) return null;
+
+    const resolvedDensity = await this.resolveIngredientDensity(
+      ing.id,
+      ing.partOf,
+      ing.density,
+    );
 
     const nameLower = ing.name.trim().toLowerCase();
 
@@ -291,6 +359,7 @@ export class GraphTraversalService {
             ingredientId: ing.id,
             ingredientName: ing.name,
             relation: "child",
+            density: resolvedDensity,
             products: categorizedProducts,
             categories,
           };
@@ -304,6 +373,7 @@ export class GraphTraversalService {
         ingredientId: ing.id,
         ingredientName: ing.name,
         relation: "direct",
+        density: resolvedDensity,
         products: directProducts,
       };
     }
@@ -361,6 +431,7 @@ export class GraphTraversalService {
                 id: parentIng.id,
                 name: parentIng.name,
               },
+              density: resolvedDensity,
               products: parentProducts,
             };
           }
@@ -400,7 +471,7 @@ export class GraphTraversalService {
     if (!clean || clean.length < 3) return null;
 
     const query = sql`
-      SELECT id, name, derivatives
+      SELECT id, name, derivatives, density
       FROM foodrepo.ingredients
       WHERE derivatives IS NOT NULL
         AND jsonb_typeof(derivatives) = 'array'
@@ -451,6 +522,7 @@ export class GraphTraversalService {
             name: row.name,
           },
           derivative: matchedDerivative,
+          density: row.density != null ? Number(row.density) : 1.0,
           products: parentProducts,
         };
       }

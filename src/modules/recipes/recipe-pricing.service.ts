@@ -1100,7 +1100,7 @@ export async function evaluateRecipePricing(
         (ingredientReqBase.unit === "g" && productPkgBase.unit === "ml")
       ) {
         // Continuous volume <-> mass conversion via culinary density
-        const density = getCulinaryDensity(supplyName);
+        const density = traversal?.density ?? getCulinaryDensity(supplyName);
         const reqGrams =
           ingredientReqBase.unit === "ml"
             ? ingredientReqBase.qty * density

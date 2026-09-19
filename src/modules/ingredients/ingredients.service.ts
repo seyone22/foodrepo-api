@@ -73,6 +73,7 @@ const ingredientColumns = {
   usedIn: ingredients.usedIn,
   substitutes: ingredients.substitutes,
   pairsWith: ingredients.pairsWith,
+  density: ingredients.density,
   fdcId: ingredients.fdcId,
   lastModified: ingredients.lastModified,
   createdAt: ingredients.createdAt,
@@ -417,6 +418,7 @@ export class IngredientsService {
     return {
       ingredient: ing.name,
       ingredientId: ing.id,
+      density: resolution.density ?? 1.0,
       products: resolution.products,
       prices: resolution.products,
       categories: resolution.categories,
