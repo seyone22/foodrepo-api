@@ -137,7 +137,10 @@ const AVERAGE_PIECE_WEIGHT_GRAMS: Record<string, number> = {
   tomato: 120,
   tomatoes: 120,
   garlic: 50, // 1 whole head of garlic ~ 50g
+  "garlic cloves": 5,
   "garlic clove": 5,
+  "cloves of garlic": 5,
+  "clove of garlic": 5,
   "clove garlic": 5,
   clove: 5,
   cloves: 5,
@@ -159,7 +162,11 @@ function getProducePieceWeightGrams(ingredientName: string): number | null {
   if (AVERAGE_PIECE_WEIGHT_GRAMS[clean]) {
     return AVERAGE_PIECE_WEIGHT_GRAMS[clean];
   }
-  for (const [key, weight] of Object.entries(AVERAGE_PIECE_WEIGHT_GRAMS)) {
+  // Sort keys descending by length so multi-word keys ("garlic cloves") match before single words ("garlic")
+  const sortedEntries = Object.entries(AVERAGE_PIECE_WEIGHT_GRAMS).sort(
+    (a, b) => b[0].length - a[0].length,
+  );
+  for (const [key, weight] of sortedEntries) {
     if (clean.includes(key)) {
       return weight;
     }
@@ -361,13 +368,31 @@ export async function evaluateRecipePricing(
         "cat food",
         "pedigree",
         "whiskas",
+        "dettol",
+        "harpic",
+        "domex",
+        "vim",
+        "lysol",
+        "savlon",
+        "antiseptic",
+        "disinfectant",
+        "sanitizer",
+        "floor cleaner",
+        "toilet cleaner",
+        "bleach",
+        "repellent",
+        "liquid detergent",
+        "detergent liquid",
+        "liquid soap",
       ];
       for (const bad of nonFoodKeywords) {
         if (lower.includes(bad) && !clean.includes(bad)) return false;
       }
       if (
         catPath?.some((c) =>
-          /household|beauty|personal|cleaning|laundry|cosmetic|toiletries|pet/i.test(c),
+          /household|beauty|personal|cleaning|laundry|cosmetic|toiletries|pet|health|pharmacy/i.test(
+            c,
+          ),
         )
       ) {
         return false;
@@ -640,12 +665,8 @@ export async function evaluateRecipePricing(
         if (nonFreshOnionWords.some((w) => lower.includes(w))) return false;
       }
 
-      // 11. Fresh Tomatoes (exclude puree, paste, ketchup, sauces, snacks)
-      if (
-        clean.includes("tomato") &&
-        !clean.includes("puree") &&
-        !clean.includes("paste")
-      ) {
+      // 11. Tomatoes (exclude puree, paste, ketchup, sauces, snacks unless requested)
+      if (clean.includes("tomato")) {
         const nonFreshTomatoWords = [
           "puree",
           "paste",
@@ -662,7 +683,13 @@ export async function evaluateRecipePricing(
           "cbl",
           "extruded",
         ];
-        if (nonFreshTomatoWords.some((w) => lower.includes(w))) return false;
+        if (
+          nonFreshTomatoWords.some(
+            (w) => lower.includes(w) && !clean.includes(w),
+          )
+        ) {
+          return false;
+        }
       }
 
       // 12. Pie Crust / Pie Dough / Pastry (exclude bread, buns, toast, rusks)
@@ -733,6 +760,38 @@ export async function evaluateRecipePricing(
         if (nonSpiceWords.some((w) => lower.includes(w))) return false;
       }
 
+      // 15. Garlic: If recipe specifies garlic (e.g. garlic cloves), product must actually be garlic, not spice cloves
+      if (clean.includes("garlic") && !lower.includes("garlic")) {
+        return false;
+      }
+
+      // 16. Beans / Legumes (exclude tofu, curd, soy meat TVP, bean bags unless requested)
+      if (clean.includes("bean")) {
+        const nonBeanWords = [
+          "curd",
+          "tofu",
+          "soya meat",
+          "soy meat",
+          "tvp",
+          "chunks",
+          "bean bag",
+          "jelly bean",
+        ];
+        if (
+          nonBeanWords.some(
+            (w) => lower.includes(w) && !clean.includes(w),
+          )
+        ) {
+          return false;
+        }
+      }
+
+      // 17. Broth / Stock: require savory stock, soup, or bouillon, never household chemicals
+      if (clean.includes("broth") || clean.includes("stock")) {
+        const nonBrothWords = ["dettol", "soap", "cleaner", "shampoo"];
+        if (nonBrothWords.some((w) => lower.includes(w))) return false;
+      }
+
       return true;
     };
 
@@ -747,16 +806,22 @@ export async function evaluateRecipePricing(
           allowedSources: allowedSources || undefined,
           disableChildAggregation: true,
         });
-        if (traversal && traversal.products.length > 0) {
-          resolvedId = traversal.ingredientId;
-          baseSupply.identifier = resolvedId;
+        if (
+          traversal &&
+          traversal.products.length > 0 &&
+          traversal.relation !== "ancestor"
+        ) {
           const validFoodProducts = traversal.products.filter((p) =>
             isFoodProduct(p.name, p.categoryPath),
           );
-          mappedData = validFoodProducts.map((p) => ({
-            product: p,
-            source: p.source as typeof priceSources.$inferSelect | null,
-          }));
+          if (validFoodProducts.length > 0) {
+            resolvedId = traversal.ingredientId;
+            baseSupply.identifier = resolvedId;
+            mappedData = validFoodProducts.map((p) => ({
+              product: p,
+              source: p.source as typeof priceSources.$inferSelect | null,
+            }));
+          }
         }
       } catch {
         // Fallback to name resolution
@@ -844,6 +909,54 @@ export async function evaluateRecipePricing(
           "puff pastry sheet",
           "puff pastry dough",
           "pastry dough",
+        ],
+        "red kidney beans": [
+          "red kidney beans",
+          "kidney beans",
+          "peacock red kidney beans",
+        ],
+        "kidney beans": [
+          "kidney beans",
+          "red kidney beans",
+        ],
+        "pinto beans": [
+          "pinto beans",
+          "red kidney beans",
+          "kidney beans",
+        ],
+        "black beans": [
+          "black beans",
+          "red kidney beans",
+        ],
+        "baked beans": [
+          "baked beans",
+          "heinz baked beans",
+        ],
+        "tomato sauce": [
+          "tomato sauce",
+          "tomato puree",
+          "tomato paste",
+          "canned tomatoes",
+        ],
+        "beef broth": [
+          "beef stock",
+          "beef broth",
+          "beef bouillon",
+          "stock cube",
+        ],
+        "cayenne pepper": [
+          "cayenne pepper",
+          "chilli powder",
+          "chili powder",
+          "crushed chilli",
+        ],
+        "garlic cloves": [
+          "garlic",
+          "garlic clove",
+        ],
+        "cloves of garlic": [
+          "garlic",
+          "garlic clove",
         ],
       };
 
@@ -944,61 +1057,64 @@ export async function evaluateRecipePricing(
         }
       }
 
-      if (traversal && traversal.products.length > 0) {
-        resolvedId = traversal.ingredientId;
-        baseSupply.identifier = resolvedId;
-
+      if (
+        traversal &&
+        traversal.products.length > 0 &&
+        traversal.relation !== "ancestor"
+      ) {
         const validFoodProducts = traversal.products.filter((p) =>
           isFoodProduct(p.name, p.categoryPath),
         );
 
-        mappedData = validFoodProducts.map((p) => ({
-          product: p,
-          source: p.source as typeof priceSources.$inferSelect | null,
-        }));
+        if (validFoodProducts.length > 0) {
+          resolvedId = traversal.ingredientId;
+          baseSupply.identifier = resolvedId;
 
-        if (traversal.relation === "derivative") {
-          const yieldRatio = traversal.derivative?.yieldRatio;
-          const reqBase = toBaseUnit(scaledQty, unitText);
-          const scaleRes = graphTraversal.scaleDerivativeQuantity(
-            reqBase.qty,
-            reqBase.unit,
-            yieldRatio,
-          );
-          effectiveQty = scaleRes.scaledQuantity;
-          effectiveUnit = reqBase.unit;
+          mappedData = validFoodProducts.map((p) => ({
+            product: p,
+            source: p.source as typeof priceSources.$inferSelect | null,
+          }));
 
-          baseSupply.fulfillment = {
-            strategy: "derivative",
-            sourceIngredient:
-              traversal.sourceIngredient?.name || traversal.ingredientName,
-            sourceIngredientId:
-              traversal.sourceIngredient?.id || traversal.ingredientId,
-            process: traversal.derivative?.process,
-            yieldRatio: traversal.derivative?.yieldRatio,
-            lossRatio: traversal.derivative?.lossRatio,
-            adjustedQuantity: {
-              value: scaleRes.scaledQuantity,
-              unitText: reqBase.unit,
-            },
-            note: scaleRes.note,
-          };
-          baseSupply.note = scaleRes.note;
-        } else if (
-          traversal.relation === "parent" ||
-          traversal.relation === "ancestor"
-        ) {
-          baseSupply.fulfillment = {
-            strategy: traversal.relation,
-            sourceIngredient:
-              traversal.sourceIngredient?.name || traversal.ingredientName,
-            sourceIngredientId:
-              traversal.sourceIngredient?.id || traversal.ingredientId,
-            note: `Fulfilled via ${traversal.relation} ingredient ${
-              traversal.sourceIngredient?.name || traversal.ingredientName
-            }`,
-          };
-          baseSupply.note = baseSupply.fulfillment.note;
+          if (traversal.relation === "derivative") {
+            const yieldRatio = traversal.derivative?.yieldRatio;
+            const reqBase = toBaseUnit(scaledQty, unitText);
+            const scaleRes = graphTraversal.scaleDerivativeQuantity(
+              reqBase.qty,
+              reqBase.unit,
+              yieldRatio,
+            );
+            effectiveQty = scaleRes.scaledQuantity;
+            effectiveUnit = reqBase.unit;
+
+            baseSupply.fulfillment = {
+              strategy: "derivative",
+              sourceIngredient:
+                traversal.sourceIngredient?.name || traversal.ingredientName,
+              sourceIngredientId:
+                traversal.sourceIngredient?.id || traversal.ingredientId,
+              process: traversal.derivative?.process,
+              yieldRatio: traversal.derivative?.yieldRatio,
+              lossRatio: traversal.derivative?.lossRatio,
+              adjustedQuantity: {
+                value: scaleRes.scaledQuantity,
+                unitText: reqBase.unit,
+              },
+              note: scaleRes.note,
+            };
+            baseSupply.note = scaleRes.note;
+          } else if (traversal.relation === "parent") {
+            baseSupply.fulfillment = {
+              strategy: traversal.relation,
+              sourceIngredient:
+                traversal.sourceIngredient?.name || traversal.ingredientName,
+              sourceIngredientId:
+                traversal.sourceIngredient?.id || traversal.ingredientId,
+              note: `Fulfilled via ${traversal.relation} ingredient ${
+                traversal.sourceIngredient?.name || traversal.ingredientName
+              }`,
+            };
+            baseSupply.note = baseSupply.fulfillment.note;
+          }
         }
       }
 

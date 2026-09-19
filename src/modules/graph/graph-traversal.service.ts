@@ -105,6 +105,64 @@ const GENERIC_PARENT_NOUNS = new Set([
   "below",
 ]);
 
+export const ABSTRACT_TAXONOMY_BLACKLIST = new Set([
+  // Physical states & non-ingredient abstractions
+  "liquid",
+  "solid",
+  "gas",
+  "fluid",
+  "water",
+  "below",
+  // Broad food groups & kingdoms (never fulfill retail products)
+  "spice",
+  "spices",
+  "herb",
+  "herbs",
+  "seasoning",
+  "seasonings",
+  "condiment",
+  "condiments",
+  "vegetable",
+  "vegetables",
+  "fruit",
+  "fruits",
+  "produce",
+  "meat",
+  "meats",
+  "poultry",
+  "seafood",
+  "fish",
+  "dairy",
+  "cheese",
+  "milk",
+  "grain",
+  "grains",
+  "cereal",
+  "cereals",
+  "flour",
+  "oil",
+  "oils",
+  "fat",
+  "fats",
+  "beverage",
+  "beverages",
+  "drink",
+  "drinks",
+  "alcohol",
+  "liquor",
+  "food",
+  "ingredient",
+  "ingredients",
+  "plant",
+  "crop",
+  "bean",
+  "beans",
+  "seed",
+  "seeds",
+  "filling",
+  "sauce",
+]);
+
 @Injectable()
 export class GraphTraversalService {
   private readonly logger = new Logger(GraphTraversalService.name);
@@ -399,7 +457,7 @@ export class GraphTraversalService {
     const maxLevel = options.maxAncestorLevel ?? 4;
     let currentParents = (ing.partOf || [])
       .map((p) => p.trim().toLowerCase())
-      .filter(Boolean);
+      .filter((p) => Boolean(p) && !ABSTRACT_TAXONOMY_BLACKLIST.has(p));
 
     currentParents.sort((a, b) => {
       const aGen = GENERIC_PARENT_NOUNS.has(a) ? 1 : 0;
@@ -416,6 +474,9 @@ export class GraphTraversalService {
       for (const parentName of currentParents) {
         if (visitedParents.has(parentName)) continue;
         visitedParents.add(parentName);
+
+        // Never resolve into abstract taxonomy blacklisted categories
+        if (ABSTRACT_TAXONOMY_BLACKLIST.has(parentName)) continue;
 
         const parentIng = await db.query.ingredients.findFirst({
           where: sql`LOWER(${ingredients.name}) = ${parentName}`,
@@ -445,7 +506,11 @@ export class GraphTraversalService {
           if (parentIng.partOf && Array.isArray(parentIng.partOf)) {
             for (const p of parentIng.partOf) {
               const pClean = p.trim().toLowerCase();
-              if (pClean && !visitedParents.has(pClean)) {
+              if (
+                pClean &&
+                !visitedParents.has(pClean) &&
+                !ABSTRACT_TAXONOMY_BLACKLIST.has(pClean)
+              ) {
                 nextParents.push(pClean);
               }
             }
