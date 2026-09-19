@@ -6,8 +6,20 @@ import { toPgId } from "@/common/utils/uuid.util";
 
 @Injectable()
 export class MappingsService {
-  async createManualMapping(productId: string, ingredientId: string) {
-    const pgProductId = toPgId(productId);
+  async createManualMapping(
+    productIdInput: string | string[],
+    ingredientId: string,
+    override: boolean = true,
+  ) {
+    const rawIds = Array.isArray(productIdInput)
+      ? productIdInput
+      : [productIdInput];
+    const productIds = rawIds.filter(Boolean);
+
+    if (productIds.length === 0) {
+      throw new BadRequestException("At least one productId is required");
+    }
+
     const pgIngredientId = toPgId(ingredientId);
 
     // 1. Create the Pending Audit Log
@@ -19,72 +31,106 @@ export class MappingsService {
         initiatedBy: "admin",
         status: "pending",
         metadata: {
-          productId: pgProductId,
+          productIds,
           ingredientId: pgIngredientId,
+          override,
           step: "validation",
         },
       })
       .returning({ id: auditLogs.id });
 
     try {
-      // 2. Verify Product exists
-      const productData = await db
-        .select({
-          id: products.id,
-          name: products.name,
-          sourceId: products.sourceId,
-        })
-        .from(products)
-        .where(eq(products.id, pgProductId))
-        .limit(1);
+      const results: any[] = [];
+      let overriddenCount = 0;
+      let newlyCreatedCount = 0;
 
-      if (productData.length === 0) {
-        throw new BadRequestException("Product not found");
+      for (const rawPid of productIds) {
+        const pgProductId = toPgId(rawPid);
+
+        // 2. Verify Product exists
+        const [product] = await db
+          .select({
+            id: products.id,
+            name: products.name,
+            sourceId: products.sourceId,
+          })
+          .from(products)
+          .where(eq(products.id, pgProductId))
+          .limit(1);
+
+        if (!product) {
+          throw new BadRequestException(`Product ${rawPid} not found`);
+        }
+
+        // 3. Check for existing mapping
+        const [existing] = await db
+          .select({
+            id: mappings.id,
+            matchedIngredients: mappings.matchedIngredients,
+          })
+          .from(mappings)
+          .where(eq(mappings.productId, pgProductId))
+          .limit(1);
+
+        if (existing) {
+          if (!override) {
+            throw new BadRequestException(
+              `Mapping already exists for product '${product.name}'`,
+            );
+          }
+
+          // Update existing mapping (override)
+          const [updated] = await db
+            .update(mappings)
+            .set({
+              matchedIngredients: [pgIngredientId],
+              confidence: 1.0,
+              method: "manual",
+              notes: "Overridden via UI Admin Tool",
+              updatedAt: new Date(),
+            })
+            .where(eq(mappings.id, existing.id))
+            .returning();
+
+          results.push(updated);
+          overriddenCount++;
+        } else {
+          // 4. Create the mapping
+          const [mapping] = await db
+            .insert(mappings)
+            .values({
+              productId: pgProductId,
+              matchedIngredients: [pgIngredientId],
+              sourceId: product.sourceId,
+              confidence: 1.0,
+              method: "manual",
+              notes: "Mapped via UI Admin Tool",
+              meta: { auditLogId: log.id },
+            })
+            .returning();
+
+          results.push(mapping);
+          newlyCreatedCount++;
+        }
       }
-
-      const product = productData[0];
-
-      // 3. Check for duplicates
-      const existing = await db
-        .select({ id: mappings.id })
-        .from(mappings)
-        .where(eq(mappings.productId, pgProductId))
-        .limit(1);
-
-      if (existing.length > 0) {
-        throw new BadRequestException("Mapping already exists for this product");
-      }
-
-      // 4. Create the mapping
-      const [mapping] = await db
-        .insert(mappings)
-        .values({
-          productId: pgProductId,
-          matchedIngredients: [pgIngredientId],
-          sourceId: product.sourceId,
-          confidence: 1.0,
-          method: "manual",
-          notes: "Mapped via UI Admin Tool",
-          meta: { auditLogId: log.id },
-        })
-        .returning();
 
       // 5. Update Audit Log to completed
       await db
         .update(auditLogs)
         .set({
           status: "completed",
-          message: `Successfully mapped product '${product.name}' (${pgProductId}) to ingredient ${pgIngredientId}`,
+          message: `Mapped ${results.length} product(s) to ingredient ${pgIngredientId} (new: ${newlyCreatedCount}, overridden: ${overriddenCount})`,
           metadata: {
-            mappingId: mapping.id,
-            productId: pgProductId,
             ingredientId: pgIngredientId,
+            totalMapped: results.length,
+            newlyCreatedCount,
+            overriddenCount,
           },
           endTime: new Date(),
         })
         .where(eq(auditLogs.id, log.id));
 
-      return mapping;
+      return Array.isArray(productIdInput) ? results : results[0];
     } catch (err: any) {
       await db
         .update(auditLogs)

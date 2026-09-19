@@ -26,6 +26,7 @@ export class MappingsController {
     const result = await this.mappingsService.createManualMapping(
       body.productId,
       body.ingredientId,
+      body.override !== false,
     );
     return {
       message: "Mapping created",

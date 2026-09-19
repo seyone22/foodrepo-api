@@ -4,6 +4,7 @@ import {
   products,
   priceSources,
   mappings,
+  ingredients,
   stockHistories,
   priceHistories,
 } from "@/database/schema";
@@ -88,8 +89,47 @@ export class ProductsService {
 
     const total = Number(totalResult[0]?.value ?? 0);
 
+    let productsWithMapping: any[] = rows.map((r) => ({ ...r, currentMapping: null }));
+    if (rows.length > 0) {
+      const productIds = rows.map((r) => r.id);
+      try {
+        const existingMappings = await db
+          .select({
+            productId: mappings.productId,
+            ingredientId: ingredients.id,
+            ingredientName: ingredients.name,
+          })
+          .from(mappings)
+          .leftJoin(
+            ingredients,
+            sql`${ingredients.id} = ${mappings.matchedIngredients}[1]`,
+          )
+          .where(inArray(mappings.productId, productIds));
+
+        const mappingMap = new Map<
+          string,
+          { ingredientId: string; ingredientName: string }
+        >();
+        for (const m of existingMappings) {
+          if (m.productId && m.ingredientId && m.ingredientName) {
+            mappingMap.set(m.productId, {
+              ingredientId: m.ingredientId,
+              ingredientName: m.ingredientName,
+            });
+          }
+        }
+
+        productsWithMapping = rows.map((r) => ({
+          ...r,
+          currentMapping: mappingMap.get(r.id) ?? null,
+        }));
+      } catch (e) {
+        // Fallback gracefully without mapping if query fails
+      }
+    }
+
     return {
-      products: rows,
+      products: productsWithMapping,
       total,
       page,
       limit,
