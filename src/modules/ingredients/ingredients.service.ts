@@ -686,7 +686,7 @@ Return JSON with:
 Use valid JSON only.`;
 
         const response = await ai.models.generateContent({
-          model: "gemini-3.6-flash",
+          model: process.env.GEMINI_MODEL || "gemini-flash-latest",
           contents: prompt,
           config: {
             responseMimeType: "application/json",

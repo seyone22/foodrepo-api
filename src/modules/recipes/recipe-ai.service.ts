@@ -12,6 +12,10 @@ export class RecipeAiService {
     }
   }
 
+  private get model(): string {
+    return process.env.GEMINI_MODEL || "gemini-flash-latest";
+  }
+
   async parseCameraRecipe(rawText: string): Promise<string | null> {
     if (!this.ai) {
       console.warn("GEMINI_API_KEY is not defined in environment");
@@ -20,7 +24,7 @@ export class RecipeAiService {
 
     try {
       const response = await this.ai.models.generateContent({
-        model: "gemini-3.6-flash",
+        model: this.model,
         contents: [
           {
             role: "user",
@@ -70,7 +74,7 @@ ${rawText}`,
 
     try {
       const response = await this.ai.models.generateContent({
-        model: "gemini-3.6-flash",
+        model: this.model,
         contents: [
           {
             role: "user",
@@ -139,7 +143,7 @@ ${ingredientList.join("\n")}`;
 
     try {
       const response = await this.ai.models.generateContent({
-        model: "gemini-3.6-flash",
+        model: this.model,
         contents: prompt,
         config: {
           responseMimeType: "application/json",
@@ -186,7 +190,7 @@ ${rawText}`;
 
     try {
       const response = await this.ai.models.generateContent({
-        model: "gemini-3.6-flash",
+        model: this.model,
         contents: prompt,
       });
 
