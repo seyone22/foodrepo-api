@@ -12,11 +12,7 @@ interface ImageCandidate extends CulinaryImageResult {
 }
 
 const BAD_KEYWORDS = [
-  "leaf",
-  "leaves",
   "tree",
-  "plant",
-  "flower",
   "branch",
   "foliage",
   "botanical",
@@ -74,7 +70,7 @@ export class ImageWaterfallService {
     // 1. PEXELS (High visual consistency)
     if (process.env.PEXELS_API_KEY) {
       try {
-        const query = encodeURIComponent(`${name} spice food culinary`);
+        const query = encodeURIComponent(`${name} food culinary ingredient`);
         const res = await fetch(
           `https://api.pexels.com/v1/search?query=${query}&per_page=3&orientation=landscape`,
           {
@@ -108,7 +104,7 @@ export class ImageWaterfallService {
 
     // 2. WIKIMEDIA COMMONS
     try {
-      const query = encodeURIComponent(`${name} spice food culinary isolated`);
+      const query = encodeURIComponent(`${name} food culinary ingredient isolated`);
       const apiUrl = `https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrsearch=${query}&gsrnamespace=6&gsrlimit=4&prop=imageinfo&iiprop=url|user&format=json`;
       const res = await fetch(apiUrl, {
         headers: { "User-Agent": "FoodRepoBot/1.0" },
@@ -183,3 +179,5 @@ export class ImageWaterfallService {
     };
   }
 }
+
+
