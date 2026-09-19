@@ -156,6 +156,57 @@ function getProducePieceWeightGrams(ingredientName: string): number | null {
   return null;
 }
 
+// ---------------------------------------------------------------------------
+// Culinary Densities (Grams per Milliliter)
+// Bridges volume measurements (tsp, tbsp, cup, ml) with packaged mass (g, kg)
+// ---------------------------------------------------------------------------
+const CULINARY_DENSITY_G_PER_ML: Record<string, number> = {
+  salt: 1.2,
+  "table salt": 1.2,
+  "fine salt": 1.2,
+  "cooking salt": 1.2,
+  sugar: 0.85,
+  "white sugar": 0.85,
+  "brown sugar": 0.85,
+  "light brown sugar": 0.85,
+  "dark brown sugar": 0.85,
+  "granulated sugar": 0.85,
+  "powdered sugar": 0.56,
+  "icing sugar": 0.56,
+  flour: 0.55,
+  "all purpose flour": 0.55,
+  "plain flour": 0.55,
+  "wheat flour": 0.55,
+  cinnamon: 0.55,
+  "ground cinnamon": 0.55,
+  nutmeg: 0.50,
+  "ground nutmeg": 0.50,
+  ginger: 0.55,
+  "ground ginger": 0.55,
+  cloves: 0.50,
+  "olive oil": 0.92,
+  oil: 0.92,
+  "vegetable oil": 0.92,
+  honey: 1.42,
+  milk: 1.03,
+  "evaporated milk": 1.07,
+  water: 1.0,
+  butter: 0.96,
+};
+
+function getCulinaryDensity(ingredientName: string): number {
+  const clean = (ingredientName || "").toLowerCase().trim();
+  if (CULINARY_DENSITY_G_PER_ML[clean]) {
+    return CULINARY_DENSITY_G_PER_ML[clean];
+  }
+  for (const [key, density] of Object.entries(CULINARY_DENSITY_G_PER_ML)) {
+    if (clean.includes(key)) {
+      return density;
+    }
+  }
+  return 1.0; // Default: 1 ml ≈ 1 g
+}
+
 function parseServingCount(raw?: number | string): number {
   if (typeof raw === "number" && !Number.isNaN(raw) && raw > 0) return raw;
   if (typeof raw === "string") {
@@ -1044,8 +1095,28 @@ export async function evaluateRecipePricing(
         );
         recipeCost = (ingredientReqBase.qty / productPkgBase.qty) * unitPrice;
         basketCost = packsNeeded * unitPrice;
+      } else if (
+        (ingredientReqBase.unit === "ml" && productPkgBase.unit === "g") ||
+        (ingredientReqBase.unit === "g" && productPkgBase.unit === "ml")
+      ) {
+        // Continuous volume <-> mass conversion via culinary density
+        const density = getCulinaryDensity(supplyName);
+        const reqGrams =
+          ingredientReqBase.unit === "ml"
+            ? ingredientReqBase.qty * density
+            : ingredientReqBase.qty;
+        const pkgGrams =
+          productPkgBase.unit === "ml"
+            ? productPkgBase.qty * density
+            : productPkgBase.qty;
+
+        if (pkgGrams > 0) {
+          packsNeeded = Math.max(1, Math.ceil(reqGrams / pkgGrams));
+          recipeCost = (reqGrams / pkgGrams) * unitPrice;
+          basketCost = packsNeeded * unitPrice;
+        }
       } else {
-        // Unit mismatch: check if one side is discrete pieces ("unit") and the other is mass ("g")
+        // Unit mismatch: check if one side is discrete pieces ("unit") and the other is mass ("g") or volume ("ml")
         const pieceWeight =
           getProducePieceWeightGrams(supplyName) ||
           (rawSupply.identifier
@@ -1056,16 +1127,16 @@ export async function evaluateRecipePricing(
           let reqGrams = ingredientReqBase.qty;
           let pkgGrams = productPkgBase.qty;
 
-          // Case A: Recipe wants discrete pieces ("unit"), product is sold by mass ("g")
+          // Case A: Recipe wants discrete pieces ("unit"), product is sold by mass/volume ("g" / "ml")
           if (
             ingredientReqBase.unit === "unit" &&
-            productPkgBase.unit === "g"
+            (productPkgBase.unit === "g" || productPkgBase.unit === "ml")
           ) {
             reqGrams = ingredientReqBase.qty * pieceWeight;
           }
-          // Case B: Recipe wants mass ("g"), product is sold by discrete pieces ("unit")
+          // Case B: Recipe wants mass/volume ("g" / "ml"), product is sold by discrete pieces ("unit")
           else if (
-            ingredientReqBase.unit === "g" &&
+            (ingredientReqBase.unit === "g" || ingredientReqBase.unit === "ml") &&
             productPkgBase.unit === "unit"
           ) {
             pkgGrams = productPkgBase.qty * pieceWeight;
@@ -1077,7 +1148,7 @@ export async function evaluateRecipePricing(
             basketCost = packsNeeded * unitPrice;
           }
         } else {
-          // Fallback when no piece weight is known
+          // Fallback when no conversion is known
           packsNeeded = 1;
           recipeCost = unitPrice;
           basketCost = unitPrice;
