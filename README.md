@@ -160,23 +160,21 @@ Interactive OpenAPI / Swagger documentation is available locally at `http://loca
 | `GET` | `/api/v1/admin/logs` | Query structured audit logs with pagination and status filters. |
 | `POST` | `/api/v1/admin/scraper/run` | Dispatch repository dispatch event to trigger automated GitHub Actions scrapers. |
 
----
-
 ## Database Schema (`foodrepo`)
 
 All tables are encapsulated within the custom `foodrepo` PostgreSQL schema managed via **Drizzle ORM**:
 
 ```
 foodrepo
-├── ingredients         # 20k+ canonical ingredients, 3072d vectors, taxonomy arrays
-├── products            # Supermarket SKUs, prices, brands, barcodes, store departments
-├── price_sources       # Supermarket chains (Keells, Cargills, Glomark, SPAR)
-├── mappings            # Junction linking products to canonical ingredient UUIDs
-├── price_histories     # Time-series log of supermarket price adjustments
-├── stock_histories     # Time-series log of supermarket inventory levels
-├── usda_foods          # Nutritional reference data from USDA FoodData Central
-├── audit_logs          # Operational & enrichment job audit trail
-└── query_embeddings    # Semantic query cache with 1536d / 3072d vectors
+ ingredients         # 20k+ canonical ingredients, 3072d vectors, taxonomy arrays
+ products            # Supermarket SKUs, prices, brands, barcodes, store departments
+ price_sources       # Supermarket chains (Keells, Cargills, Glomark, SPAR)
+ mappings            # Junction linking products to canonical ingredient UUIDs
+ price_histories     # Time-series log of supermarket price adjustments
+ stock_histories     # Time-series log of supermarket inventory levels
+ usda_foods          # Nutritional reference data from USDA FoodData Central
+ audit_logs          # Operational & enrichment job audit trail
+ query_embeddings    # Semantic query cache with 1536d / 3072d vectors
 ```
 
 ### Key Indexes
