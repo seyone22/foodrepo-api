@@ -119,7 +119,8 @@ export class ImageWaterfallService {
         for (const key of Object.keys(pages)) {
           const info = pages[key]?.imageinfo?.[0];
           const pageTitle = pages[key]?.title || "";
-          if (info?.url) {
+          const isImage = /\.(jpe?g|png|webp|avif)(\?.*)?$/i.test(info?.url || "");
+          if (info?.url && isImage) {
             const score = this.scoreCulinaryImage(
               info.url,
               pageTitle,

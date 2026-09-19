@@ -140,6 +140,73 @@ export class IngredientsController {
     return data;
   }
 
+  @Post("enhance")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: "Bulk AI enrichment for ingredients (Collection / Batch Action)",
+  })
+  @ApiResponse({ status: 200, description: "Bulk enrichment completed." })
+  async enhanceIngredients(
+    @Body(new ZodValidationPipe(enrichIngredientSchema))
+    dto: EnrichIngredientDto,
+  ) {
+    const ids = Array.isArray(dto.id) ? dto.id : [dto.id];
+    const enriched = await this.ingredientsService.enhanceIngredients(ids);
+    return { message: "Enhancement completed", enriched };
+  }
+
+  @Post("enhance/image")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: "Image waterfall fetch (Collection / Batch Action)",
+  })
+  @ApiResponse({ status: 200, description: "Image successfully discovered." })
+  @ApiResponse({ status: 404, description: "No image found." })
+  async enhanceIngredientImage(
+    @Body(new ZodValidationPipe(enhanceImageSchema))
+    dto: EnhanceImageDto,
+  ) {
+    const updated = await this.ingredientsService.enhanceIngredientImage(dto.id);
+    if (!updated) {
+      throw new NotFoundException("No image found across all providers.");
+    }
+    return { message: "Success", ingredient: updated };
+  }
+
+  @Post("parse")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: "Parse raw ingredient strings into structured quantities and units",
+  })
+  @ApiResponse({ status: 200, description: "Structured ingredient items array." })
+  async parseIngredients(
+    @Body(new ZodValidationPipe(parseIngredientsSchema))
+    dto: ParseIngredientsDto,
+  ) {
+    return this.aiService.parseIngredients(dto.ingredients);
+  }
+
+  @Post("parse-recipe")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: "Convert raw recipe text/OCR into Schema.org Recipe JSON-LD",
+  })
+  @ApiResponse({ status: 200, description: "Parsed Schema.org Recipe JSON." })
+  async parseCameraRecipe(
+    @Body(new ZodValidationPipe(parseCameraRecipeSchema))
+    dto: ParseCameraRecipeDto,
+  ) {
+    const recipeJson = await this.aiService.parseCameraRecipeToJsonLd(dto.rawText);
+    if (!recipeJson) {
+      throw new BadRequestException("Failed to parse recipe text.");
+    }
+    try {
+      return JSON.parse(recipeJson);
+    } catch {
+      return recipeJson;
+    }
+  }
+
   @Get(":id")
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -257,72 +324,5 @@ export class IngredientsController {
       throw new NotFoundException("No image found across all providers.");
     }
     return { message: "Success", ingredient: updated };
-  }
-
-  @Post("enhance")
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({
-    summary: "Bulk AI enrichment for ingredients (Collection / Batch Action)",
-  })
-  @ApiResponse({ status: 200, description: "Bulk enrichment completed." })
-  async enhanceIngredients(
-    @Body(new ZodValidationPipe(enrichIngredientSchema))
-    dto: EnrichIngredientDto,
-  ) {
-    const ids = Array.isArray(dto.id) ? dto.id : [dto.id];
-    const enriched = await this.ingredientsService.enhanceIngredients(ids);
-    return { message: "Enhancement completed", enriched };
-  }
-
-  @Post("enhance/image")
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({
-    summary: "Image waterfall fetch (Collection / Batch Action)",
-  })
-  @ApiResponse({ status: 200, description: "Image successfully discovered." })
-  @ApiResponse({ status: 404, description: "No image found." })
-  async enhanceIngredientImage(
-    @Body(new ZodValidationPipe(enhanceImageSchema))
-    dto: EnhanceImageDto,
-  ) {
-    const updated = await this.ingredientsService.enhanceIngredientImage(dto.id);
-    if (!updated) {
-      throw new NotFoundException("No image found across all providers.");
-    }
-    return { message: "Success", ingredient: updated };
-  }
-
-  @Post("parse")
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({
-    summary: "Parse raw ingredient strings into structured quantities and units",
-  })
-  @ApiResponse({ status: 200, description: "Structured ingredient items array." })
-  async parseIngredients(
-    @Body(new ZodValidationPipe(parseIngredientsSchema))
-    dto: ParseIngredientsDto,
-  ) {
-    return this.aiService.parseIngredients(dto.ingredients);
-  }
-
-  @Post("parse-recipe")
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({
-    summary: "Convert raw recipe text/OCR into Schema.org Recipe JSON-LD",
-  })
-  @ApiResponse({ status: 200, description: "Parsed Schema.org Recipe JSON." })
-  async parseCameraRecipe(
-    @Body(new ZodValidationPipe(parseCameraRecipeSchema))
-    dto: ParseCameraRecipeDto,
-  ) {
-    const recipeJson = await this.aiService.parseCameraRecipeToJsonLd(dto.rawText);
-    if (!recipeJson) {
-      throw new BadRequestException("Failed to parse recipe text.");
-    }
-    try {
-      return JSON.parse(recipeJson);
-    } catch {
-      return recipeJson;
-    }
   }
 }

@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, NotFoundException } from "@nestjs/common";
 import { GoogleGenAI } from "@google/genai";
 import { db } from "@/database/database.module";
 import {
@@ -777,7 +777,7 @@ Use valid JSON only.`;
       .limit(1);
 
     if (!ingredient) {
-      throw new Error("Ingredient not found");
+      throw new NotFoundException(`Ingredient with ID ${id} not found`);
     }
 
     let logId: string | null = null;
