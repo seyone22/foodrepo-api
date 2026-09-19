@@ -45,7 +45,7 @@ async function bootstrap() {
 
   const port = process.env.PORT || 4000;
   await app.listen(port);
-  console.log(`🚀 FoodRepo API running at: http://localhost:${port}/api/v1`);
-  console.log(`📖 Swagger documentation at: http://localhost:${port}/api/docs (also /docs)`);
+  console.log(`FoodRepo API running on port ${port} (https://foodapi.seyone.dev/api/v1)`);
+  console.log(`Swagger documentation available at /api/docs`);
 }
 bootstrap();
