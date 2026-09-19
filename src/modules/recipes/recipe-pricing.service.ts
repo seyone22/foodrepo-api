@@ -32,8 +32,13 @@ interface StandardizedQty {
   unit: "g" | "ml" | "unit";
 }
 
-function toBaseUnit(qty: number, rawUnit?: string): StandardizedQty {
+function toBaseUnit(
+  qty: number,
+  rawUnit?: string,
+  ingredientName?: string,
+): StandardizedQty {
   const u = (rawUnit || "").toLowerCase().trim();
+  const ingName = (ingredientName || "").toLowerCase().trim();
 
   // Mass -> grams
   if (["g", "gram", "grams"].includes(u)) {
@@ -81,8 +86,14 @@ function toBaseUnit(qty: number, rawUnit?: string): StandardizedQty {
     return { qty: qty * 3785.41, unit: "ml" };
   }
 
-  // Culinary packaging containers -> grams
+  // Culinary packaging containers -> grams or ml
   if (["can", "cans", "tin", "tins"].includes(u)) {
+    if (ingName.includes("condensed milk")) {
+      return { qty: qty * 390, unit: "g" };
+    }
+    if (ingName.includes("coconut milk")) {
+      return { qty: qty * 400, unit: "ml" };
+    }
     return { qty: qty * 425, unit: "g" };
   }
   if (["bunch", "bunches"].includes(u)) {
@@ -1071,7 +1082,7 @@ export async function evaluateRecipePricing(
     const priceMap = new Map(latestPrices.map((p) => [p.productId, p]));
 
     // Compute costs for each product offer
-    const ingredientReqBase = toBaseUnit(effectiveQty, effectiveUnit);
+    const ingredientReqBase = toBaseUnit(effectiveQty, effectiveUnit, supplyName);
     const candidateOffers: Offer[] = [];
 
     for (const { product, source } of filteredMapped) {
@@ -1097,6 +1108,7 @@ export async function evaluateRecipePricing(
       const productPkgBase = toBaseUnit(
         normalizedPkg.quantity,
         normalizedPkg.unit,
+        product.name,
       );
 
       // Cost calculation
@@ -1110,7 +1122,7 @@ export async function evaluateRecipePricing(
       ) {
         packsNeeded = Math.max(
           1,
-          Math.ceil(ingredientReqBase.qty / productPkgBase.qty),
+          Math.ceil((ingredientReqBase.qty - 0.02 * productPkgBase.qty) / productPkgBase.qty),
         );
         recipeCost = (ingredientReqBase.qty / productPkgBase.qty) * unitPrice;
         basketCost = packsNeeded * unitPrice;
