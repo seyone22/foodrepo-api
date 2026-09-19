@@ -97,6 +97,11 @@ const GENERIC_PARENT_NOUNS = new Set([
   "snack",
   "mix",
   "cream",
+  "bean",
+  "seed",
+  "legume",
+  "fruit",
+  "vegetable",
   "below",
 ]);
 
