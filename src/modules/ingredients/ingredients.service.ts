@@ -522,4 +522,116 @@ export class IngredientsService {
       ...(resolvedFrom && { resolvedFrom }),
     };
   }
+
+  async fetchIngredientsByIds(ids: string[]) {
+    if (ids.length === 0) return { ingredients: [], total: 0 };
+    const pgIds = ids.map((id) => toPgId(id));
+    const rows = await db
+      .select(ingredientColumns)
+      .from(ingredients)
+      .where(inArray(ingredients.id, pgIds));
+    return { ingredients: rows, total: rows.length };
+  }
+
+  async addIngredient(data: any) {
+    const name = data.name?.trim();
+    if (!name) throw new Error("Ingredient name is required");
+    const embedding = await this.embedText(name);
+
+    const [created] = await db
+      .insert(ingredients)
+      .values({
+        name,
+        aliases: Array.isArray(data.aliases) ? data.aliases : [],
+        country: Array.isArray(data.country) ? data.country : [],
+        cuisine: Array.isArray(data.cuisine) ? data.cuisine : [],
+        region: Array.isArray(data.region) ? data.region : [],
+        flavorProfile: Array.isArray(data.flavor_profile)
+          ? data.flavor_profile
+          : [],
+        dietaryFlags: Array.isArray(data.dietary_flags)
+          ? data.dietary_flags
+          : [],
+        provenance: data.provenance?.trim() || "MISSING",
+        comment: data.comment?.trim(),
+        pronunciation: data.pronunciation?.trim(),
+        image: data.photo?.trim()
+          ? { url: data.photo.trim(), missing: false }
+          : { missing: true },
+        embedding,
+      })
+      .returning();
+
+    return created;
+  }
+
+  async updateIngredient(id: string, data: any) {
+    const pgId = toPgId(id);
+    const [updated] = await db
+      .update(ingredients)
+      .set({
+        ...data,
+        updatedAt: new Date(),
+      })
+      .where(eq(ingredients.id, pgId))
+      .returning();
+
+    return updated || null;
+  }
+
+  async deleteIngredient(id: string) {
+    const pgId = toPgId(id);
+    const [deleted] = await db
+      .delete(ingredients)
+      .where(eq(ingredients.id, pgId))
+      .returning();
+
+    return deleted || null;
+  }
+
+  async getBestIngredientMatch(query: string) {
+    const cleanQuery = query.trim();
+    if (!cleanQuery) {
+      return { match: null, confidence: 0 };
+    }
+
+    const cached = await db
+      .select({ embedding: queryEmbeddings.embedding })
+      .from(queryEmbeddings)
+      .where(eq(queryEmbeddings.query, cleanQuery))
+      .limit(1);
+
+    let queryVector: number[];
+    if (cached.length > 0) {
+      queryVector = cached[0].embedding as number[];
+    } else {
+      queryVector = await this.embedText(cleanQuery);
+      await db.insert(queryEmbeddings).values({
+        query: cleanQuery,
+        embedding: queryVector,
+      });
+    }
+
+    const similarity = sql<number>`1 - (${cosineDistance(ingredients.embedding, queryVector)})`;
+    const results = await db
+      .select({
+        name: ingredients.name,
+        score: similarity,
+      })
+      .from(ingredients)
+      .orderBy(desc(similarity))
+      .limit(1);
+
+    if (results.length === 0) {
+      return { match: null, confidence: 0 };
+    }
+
+    const best = results[0];
+    const confidence = Math.min(Math.max(Number(best.score), 0), 1);
+    return {
+      match: best.name,
+      confidence,
+    };
+  }
+
 }

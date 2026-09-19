@@ -1,16 +1,25 @@
 import {
+  Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
   NotFoundException,
   Param,
+  Patch,
+  Post,
   Query,
-  UsePipes,
 } from "@nestjs/common";
 import { ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags } from "@nestjs/swagger";
 import { ZodValidationPipe } from "nestjs-zod";
 import {
+  BulkIngredientsDto,
+  bulkIngredientsSchema,
+  CreateIngredientDto,
+  createIngredientSchema,
+  MatchIngredientDto,
+  matchIngredientSchema,
   SearchIngredientsQueryDto,
   searchIngredientsQuerySchema,
 } from "./dto/ingredients.dto";
@@ -35,6 +44,69 @@ export class IngredientsController {
     queryDto: SearchIngredientsQueryDto,
   ) {
     const data = await this.ingredientsService.searchIngredients(
+      queryDto.query || "",
+      {
+        page: queryDto.page,
+        limit: queryDto.limit,
+        autosuggest: queryDto.autosuggest,
+        country: queryDto.country,
+        cuisine: queryDto.cuisine,
+        region: queryDto.region,
+        flavor: queryDto.flavor,
+        includeProducts: queryDto.includeProducts,
+      },
+    );
+
+    if (!data.results || data.results.length === 0) {
+      throw new NotFoundException("No ingredients found");
+    }
+
+    return data;
+  }
+
+  @Post()
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: "Add a new canonical ingredient" })
+  async addIngredient(
+    @Body(new ZodValidationPipe(createIngredientSchema))
+    body: CreateIngredientDto,
+  ) {
+    const ingredient = await this.ingredientsService.addIngredient(body);
+    return { message: "Ingredient added", ingredient };
+  }
+
+  @Post("bulk")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: "Fetch multiple ingredients by UUID array" })
+  async fetchIngredientsByIds(
+    @Body(new ZodValidationPipe(bulkIngredientsSchema))
+    body: BulkIngredientsDto,
+  ) {
+    const result = await this.ingredientsService.fetchIngredientsByIds(body.ids);
+    if (result.ingredients.length === 0) {
+      throw new NotFoundException("No ingredients found");
+    }
+    return result;
+  }
+
+  @Post("match")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: "Get best semantic match for raw ingredient string" })
+  async getBestIngredientMatch(
+    @Body(new ZodValidationPipe(matchIngredientSchema))
+    body: MatchIngredientDto,
+  ) {
+    return this.ingredientsService.getBestIngredientMatch(body.query);
+  }
+
+  @Get("vector")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: "Direct vector search for ingredients" })
+  async searchIngredientsVector(
+    @Query(new ZodValidationPipe(searchIngredientsQuerySchema))
+    queryDto: SearchIngredientsQueryDto,
+  ) {
+    const data = await this.ingredientsService.searchIngredientsVector(
       queryDto.query || "",
       {
         page: queryDto.page,
@@ -91,6 +163,30 @@ export class IngredientsController {
       ingredient,
       ...(withProducts && { products: products || [] }),
     };
+  }
+
+  @Patch(":id")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: "Update ingredient details" })
+  @ApiParam({ name: "id", description: "Ingredient UUID" })
+  async updateIngredient(@Param("id") id: string, @Body() body: any) {
+    const updated = await this.ingredientsService.updateIngredient(id, body);
+    if (!updated) {
+      throw new NotFoundException("Ingredient not found");
+    }
+    return { message: "Updated", ingredient: updated };
+  }
+
+  @Delete(":id")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: "Delete an ingredient" })
+  @ApiParam({ name: "id", description: "Ingredient UUID" })
+  async deleteIngredient(@Param("id") id: string) {
+    const deleted = await this.ingredientsService.deleteIngredient(id);
+    if (!deleted) {
+      throw new NotFoundException("Ingredient not found");
+    }
+    return { message: "Deleted", ingredient: deleted };
   }
 
   @Get(":id/price")
