@@ -8,23 +8,78 @@ export interface NormalizedQtyUnit {
 /**
  * Extracts meaningful quantity and unit from raw supermarket product data.
  * Handles broken feeds like Keells: "NO" units, missing units, 0.4 KG, quantities in name, and multi-packs.
+ * Supports store-specific structured metadata such as Cargills UnitSize and UOM.
  * Normalizes all weights to grams, volumes to milliliters, and units to "unit" for pieces.
  */
 export function normalizeQuantityUnit(raw: any): NormalizedQtyUnit {
   let quantity = 1;
-  let unit = (typeof raw === "object" && raw?.unit) ? raw.unit.toLowerCase() : "";
+  let unit = typeof raw === "object" && raw?.unit ? raw.unit.toLowerCase() : "";
 
-  const nameStr = typeof raw === "string" ? raw : (raw?.name || raw?.title || raw?.ItemName);
+  const nameStr =
+    typeof raw === "string"
+      ? raw
+      : raw?.name || raw?.title || raw?.ItemName;
 
   if (!nameStr) {
     throw new Error(
-      `❌ Missing name or title in raw object! Received:\n${JSON.stringify(raw, null, 2)}`,
+      `Missing name or title in raw object! Received:\n${JSON.stringify(raw, null, 2)}`,
     );
   }
 
   const name = nameStr.toLowerCase();
 
-  // 1️⃣ Handle multi-packs, e.g., "2x400g", "6 pack of 330ml"
+  // Dedicated normalization for whole poultry eggs (loose & multi-packs)
+  const isNonWholeEggProduct =
+    /\b(noodles?|pasta|spaghetti|powder|seasoning|crisps?|chips?|shampoo|biscuit|cookie|cracker|mayo|mayonnaise|sauce|colour|coloring)\b/i.test(
+      name,
+    );
+  const isEggProduct = /\beggs?\b/i.test(name) && !isNonWholeEggProduct;
+  if (isEggProduct) {
+    const eggCountMatch =
+      name.match(/\b(30|15|12|10|6)\s*(?:'s|s|pack|pkt|pcs)\b/i) ||
+      name.match(/\b(?:pack|pkt)\s*of\s*(30|15|12|10|6)\b/i) ||
+      name.match(/\b(30|15|12|10|6)\b/);
+
+    if (eggCountMatch) {
+      return { quantity: parseInt(eggCountMatch[1], 10), unit: "unit" };
+    }
+
+    if (/\bbulk\b/i.test(name) || raw?.uom === "NO" || raw?.uom === "EA") {
+      return { quantity: 1, unit: "unit" };
+    }
+
+    const rawUnitSize = raw?.UnitSize ? parseInt(raw.UnitSize, 10) : null;
+    if (rawUnitSize && rawUnitSize > 1) {
+      return { quantity: rawUnitSize, unit: "unit" };
+    }
+
+    return { quantity: 10, unit: "unit" };
+  }
+
+  // Dedicated normalization for whole coconuts (pol, thambili)
+  const isNonWholeCoconutProduct =
+    /\b(oil|milk|powder|cream|flour|sugar|treacle|vinegar|water|nectar|aminos|honey|syrup|butter|spread|jaggery|paste|scraped|grated|shredded|desiccated|sambol|chutney|chips?|biscuit|cookie|chocolate|toffee|soap|shampoo|lotion|scrub|conditioner|scraper|shell|charcoal)\b/i.test(
+      name,
+    );
+  const isWholeCoconut =
+    /\b(coconuts?|pol|thambili)\b/i.test(name) && !isNonWholeCoconutProduct;
+  if (isWholeCoconut) {
+    const packMatch =
+      name.match(/\b(?:pack|pkt)\s*of\s*(\d+)\b/i) ||
+      name.match(/\b(\d+)\s*(?:'s|s|pack|pkt|pcs)\b/i);
+    if (packMatch) {
+      return { quantity: parseInt(packMatch[1], 10), unit: "unit" };
+    }
+
+    const rawUnitSize = raw?.UnitSize ? parseInt(raw.UnitSize, 10) : null;
+    if (rawUnitSize && rawUnitSize > 1) {
+      return { quantity: rawUnitSize, unit: "unit" };
+    }
+
+    return { quantity: 1, unit: "unit" };
+  }
+
+  // Handle multi-packs in title, e.g., "2x400g", "6 pack of 330ml"
   const multiPackMatch = name.match(
     /(\d+)\s*[xX*]\s*(\d+(?:\.\d+)?)\s*(g|kg|ml|l)/i,
   );
@@ -57,7 +112,7 @@ export function normalizeQuantityUnit(raw: any): NormalizedQtyUnit {
     return { quantity, unit };
   }
 
-  // 2️⃣ Match simple quantity in name, e.g., "400g", "1kg", "500ml"
+  // Handle simple explicit quantity in name, e.g., "400g", "1kg", "500ml"
   const qtyMatch = name.match(
     /(\d+(?:\.\d+)?)\s*(g|kg|ml|l|ltrs?|pack|pcs|piece|bottle|bag)/i,
   );
@@ -99,9 +154,67 @@ export function normalizeQuantityUnit(raw: any): NormalizedQtyUnit {
     return { quantity, unit };
   }
 
-  // 3️⃣ Heuristics for broken fields
-  if ((unit === "kg" || unit === "") && raw.quantity) {
-    // Assume kg → grams
+  // Structured store metadata check (e.g. Cargills UnitSize and UOM)
+  // When the item name has no weight substring, use explicit backend attributes.
+  if (typeof raw === "object" && raw !== null) {
+    const rawUnitSize = raw.UnitSize !== undefined && raw.UnitSize !== null ? parseFloat(raw.UnitSize) : null;
+    const rawUom = raw.UOM ? String(raw.UOM).toLowerCase().trim() : "";
+
+    if (rawUnitSize && !isNaN(rawUnitSize) && rawUnitSize > 0 && rawUom) {
+      switch (rawUom) {
+        case "g":
+        case "gr":
+          return { quantity: rawUnitSize, unit: "g" };
+        case "kg":
+          return { quantity: rawUnitSize * 1000, unit: "g" };
+        case "ml":
+          return { quantity: rawUnitSize, unit: "ml" };
+        case "l":
+        case "lt":
+          return { quantity: rawUnitSize * 1000, unit: "ml" };
+        case "pcs":
+        case "pc":
+        case "each":
+        case "s":
+        case "pkt":
+          return { quantity: rawUnitSize, unit: "unit" };
+        default:
+          return { quantity: rawUnitSize, unit: rawUom };
+      }
+    }
+
+    // Fallback: Check raw.SearchTerm for embedded package size patterns (e.g. ",250g,", "- 500g")
+    const searchTerm = raw.SearchTerm || raw.search_terms;
+    if (typeof searchTerm === "string" && searchTerm.trim()) {
+      const termMatch = searchTerm.match(
+        /(?:^|[,\s\-_])(\d+(?:\.\d+)?)\s*(g|kg|ml|l|ltrs?|pcs?|each)(?:$|[,\s\-_])/i,
+      );
+      if (termMatch) {
+        const parsedTermQty = parseFloat(termMatch[1]);
+        const parsedTermUnit = termMatch[2].toLowerCase();
+
+        switch (parsedTermUnit) {
+          case "g":
+            return { quantity: parsedTermQty, unit: "g" };
+          case "kg":
+            return { quantity: parsedTermQty * 1000, unit: "g" };
+          case "ml":
+            return { quantity: parsedTermQty, unit: "ml" };
+          case "l":
+          case "ltr":
+          case "ltrs":
+            return { quantity: parsedTermQty * 1000, unit: "ml" };
+          case "pc":
+          case "pcs":
+          case "each":
+            return { quantity: parsedTermQty, unit: "unit" };
+        }
+      }
+    }
+  }
+
+  // Heuristics for broken fields
+  if ((unit === "kg" || unit === "") && raw?.quantity) {
     quantity = raw.quantity * 1000;
     unit = "g";
   } else if (unit === "no" || unit === "ea") {
@@ -109,10 +222,10 @@ export function normalizeQuantityUnit(raw: any): NormalizedQtyUnit {
     unit = "unit";
   }
 
-  // 4️⃣ Fallback for completely missing or empty unit
+  // Fallback for completely missing or empty unit
   if (!unit || unit === "") {
     unit = "kg";
-    quantity = quantity * 1; // normalize to grams
+    quantity = quantity * 1;
   }
 
   return { quantity, unit };
@@ -120,33 +233,22 @@ export function normalizeQuantityUnit(raw: any): NormalizedQtyUnit {
 
 /**
  * Normalizes various price formats to a clean number (double).
- *
- * Handles:
- *  - "Rs.1,400"  → 1400
- *  - "Rs. 1,400.50" → 1400.5
- *  - "1,400.00" → 1400
- *  - 3800 → 3800
- *  - 3800.75 → 3800.75
- *  - null, undefined, NaN → 0
  */
 export function normalizePrice(raw: any): number {
   if (raw == null) return 0;
 
-  // If already a number (int or float)
   if (typeof raw === "number" && !isNaN(raw)) {
     return raw;
   }
 
-  // Convert to string and clean up
   const str = String(raw)
-    .replace(/[^\d.,]/g, "") // Remove all non-numeric, non-dot, non-comma chars
-    .replace(/,/g, ""); // Remove thousand separators
+    .replace(/[^\d.,]/g, "")
+    .replace(/,/g, "");
 
-  // Parse as float
   const parsed = parseFloat(str);
 
   if (isNaN(parsed)) {
-    console.warn(`⚠️ normalizePrice: failed to parse price from "${raw}"`);
+    console.warn(`normalizePrice: failed to parse price from "${raw}"`);
     return 0;
   }
 
