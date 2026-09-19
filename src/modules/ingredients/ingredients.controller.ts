@@ -246,4 +246,31 @@ export class IngredientsController {
       return recipeJson;
     }
   }
+
+  @Post("enhance")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: "Run AI enrichment on ingredients by UUID" })
+  async enhanceIngredients(@Body() body: { id?: string | string[] }) {
+    const rawId = body.id;
+    const ids = Array.isArray(rawId) ? rawId : rawId ? [rawId] : [];
+    if (!ids.length) {
+      throw new BadRequestException("No IDs provided");
+    }
+    const enriched = await this.ingredientsService.enhanceIngredients(ids);
+    return { message: "Enhancement completed", enriched };
+  }
+
+  @Post("enhance/image")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: "Fetch and score culinary image for an ingredient" })
+  async enhanceIngredientImage(@Body() body: { id?: string }) {
+    if (!body.id) {
+      throw new BadRequestException("ID required");
+    }
+    const updated = await this.ingredientsService.enhanceIngredientImage(body.id);
+    if (!updated) {
+      throw new NotFoundException("No image found across all providers.");
+    }
+    return { message: "Success", ingredient: updated };
+  }
 }
