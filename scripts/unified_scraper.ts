@@ -1,22 +1,22 @@
-import dotenv from "dotenv";
+import * as dotenv from "dotenv";
+dotenv.config();
 dotenv.config({ path: ".env.local" });
 
-import { db } from "@/utils/db";
+import { db } from "@/database/database.module";
 import {
   products,
   priceHistories,
   stockHistories,
   auditLogs,
-} from "@/utils/schema";
+} from "@/database/schema";
 import { eq, sql } from "drizzle-orm";
-import { normalizeQuantityUnit } from "@/utils/normalizeQtyUtil";
+import { normalizeQuantityUnit } from "@/common/utils/normalize-qty.util";
 
 import { CargillsFetcher } from "@/services/cargillsFetcher";
 import { KeellsFetcher } from "@/services/keelsFetcher";
 import { SparFetcher } from "@/services/sparFetcher";
 import { GlomarkFetcher } from "@/services/glomarkFetcher";
 import { ArpicoFetcher } from "@/services/arpicoFetcher";
-
 
 // Define supported stores
 const STORES = [
@@ -34,7 +34,7 @@ async function fetchStoreData(
   FetcherClass: any,
   mode: string,
 ) {
-  console.log(`\n🔹 Starting ${storeName} scrape...`);
+  console.log(`\nStarting ${storeName} scrape...`);
   const fetcher = new FetcherClass();
 
   let rawProducts: any[] = [];
@@ -42,7 +42,7 @@ async function fetchStoreData(
   if (mode === "alphabet") {
     const alphabet = "abcdefghijklmnopqrstuvwxyz".split("");
     for (const letter of alphabet) {
-      console.log(`🔤 Fetching products starting with '${letter}'...`);
+      console.log(`Fetching products starting with '${letter}'...`);
       try {
         const result = await fetcher.fetchFromSource({
           itemsPerPage: 10000,
@@ -50,17 +50,17 @@ async function fetchStoreData(
         });
         if (Array.isArray(result) && result.length > 0) {
           rawProducts.push(...result);
-          console.log(`✅ Got ${result.length} items for '${letter}'`);
+          console.log(`Got ${result.length} items for '${letter}'`);
         } else {
-          console.log(`⚠️ No results for '${letter}'`);
+          console.log(`No results for '${letter}'`);
         }
       } catch (err) {
-        console.error(`❌ Error fetching '${letter}':`, err);
+        console.error(`Error fetching '${letter}':`, err);
       }
-      await new Promise((r) => setTimeout(r, 500)); // avoid rate limits
+      await new Promise((r) => setTimeout(r, 500));
     }
   } else {
-    console.log("⚙️ Fetching all products...");
+    console.log("Fetching all products...");
     rawProducts = await fetcher.fetchFromSource({
       itemsPerPage: 10000,
       ingredientName: "",
@@ -68,7 +68,7 @@ async function fetchStoreData(
   }
 
   console.log(
-    `📦 Retrieved ${rawProducts.length} raw items from ${storeName}.`,
+    `Retrieved ${rawProducts.length} raw items from ${storeName}.`,
   );
   return { fetcher, rawProducts };
 }
@@ -80,9 +80,9 @@ async function processAndUpsert(
 ) {
   if (!rawProducts.length) return;
 
-  console.log(`🧪 Normalizing ${storeName} products...`);
+  console.log(`Normalizing ${storeName} products...`);
 
-  // 1. Map & normalize raw products while deduplicating by (externalId, sourceId)
+  // 1. Map and normalize raw products while deduplicating by (externalId, sourceId)
   const validProductsMap = new Map<string, any>();
 
   for (const raw of rawProducts) {
@@ -108,7 +108,7 @@ async function processAndUpsert(
 
   const uniqueMappedProducts = Array.from(validProductsMap.values());
   console.log(
-    `💾 Saving/updating ${uniqueMappedProducts.length} unique products for ${storeName} in PostgreSQL (Batch size: ${BATCH_SIZE})...`,
+    `Saving/updating ${uniqueMappedProducts.length} unique products for ${storeName} in PostgreSQL (Batch size: ${BATCH_SIZE})...`,
   );
 
   let upsertCount = 0;
@@ -116,7 +116,6 @@ async function processAndUpsert(
   let dailyStockPoints = 0;
 
   try {
-    // Process in chunks of BATCH_SIZE to avoid hitting statement limits and single-row network overhead
     for (let i = 0; i < uniqueMappedProducts.length; i += BATCH_SIZE) {
       const chunk = uniqueMappedProducts.slice(i, i + BATCH_SIZE);
 
@@ -186,7 +185,6 @@ async function processAndUpsert(
 
       upsertCount += upsertedRows.length;
 
-      // Build lookup map of externalId -> Database UUID
       const idMap = new Map<string, string>();
       for (const row of upsertedRows) {
         if (row.externalId) {
@@ -218,36 +216,33 @@ async function processAndUpsert(
         }
       }
 
-      // Bulk Insert Price History
       if (priceBatch.length > 0) {
         await db.insert(priceHistories).values(priceBatch);
         dailyPricePoints += priceBatch.length;
       }
 
-      // Bulk Insert Stock History
       if (stockBatch.length > 0) {
         await db.insert(stockHistories).values(stockBatch);
         dailyStockPoints += stockBatch.length;
       }
     }
 
-    console.log(`✅ ${storeName}: ${upsertCount} products processed.`);
+    console.log(`${storeName}: ${upsertCount} products processed.`);
     console.log(
-      `📈 Logged ${dailyPricePoints} daily price history data points.`,
+      `Logged ${dailyPricePoints} daily price history data points.`,
     );
     console.log(
-      `📊 Logged ${dailyStockPoints} daily stock history data points.`,
+      `Logged ${dailyStockPoints} daily stock history data points.`,
     );
   } catch (err: any) {
-    console.error(`⚠️ Database error (${storeName}):`, err.message);
+    console.error(`Database error (${storeName}):`, err.message);
     throw err;
   }
 }
 
 async function main() {
-  console.log("🔸 Starting unified store scrape...");
+  console.log("Starting unified store scrape...");
 
-  // 1. Create an independent Audit Log for THIS specific execution
   let currentLogId: string | null = null;
   try {
     const [currentLog] = await db
@@ -264,15 +259,14 @@ async function main() {
       })
       .returning({ id: auditLogs.id });
     currentLogId = currentLog.id;
-    console.log(`📝 Audit Log created: ${currentLogId}`);
+    console.log(`Audit Log created: ${currentLogId}`);
   } catch (logErr: any) {
-    console.error("⚠️ Failed to initialize Audit Log:", logErr.message);
+    console.error("Failed to initialize Audit Log:", logErr.message);
   }
 
   let successCount = 0;
   let errorMessages: string[] = [];
 
-  // 2. Wrap the loop in a try-catch to ensure the log is updated on failure
   try {
     for (const store of STORES) {
       try {
@@ -284,13 +278,12 @@ async function main() {
         await processAndUpsert(fetcher, rawProducts, store.name);
         successCount++;
       } catch (err: any) {
-        const msg = `❌ Error processing ${store.name}: ${err.message}`;
+        const msg = `Error processing ${store.name}: ${err.message}`;
         console.error(msg);
         errorMessages.push(msg);
       }
     }
 
-    // 3. Finalize success / partial success log
     if (currentLogId) {
       try {
         await db
@@ -304,13 +297,12 @@ async function main() {
             }`,
           })
           .where(eq(auditLogs.id, currentLogId));
-        console.log("✅ Audit Log finalized.");
+        console.log("Audit Log finalized.");
       } catch (logErr: any) {
-        console.error("⚠️ Failed to finalize Audit Log:", logErr.message);
+        console.error("Failed to finalize Audit Log:", logErr.message);
       }
     }
   } catch (fatalErr: any) {
-    // 4. Handle Fatal script-level crashes
     if (currentLogId) {
       try {
         await db
@@ -323,22 +315,21 @@ async function main() {
           })
           .where(eq(auditLogs.id, currentLogId));
       } catch (logErr: any) {
-        console.error("⚠️ Failed to update Audit Log on fatal error:", logErr.message);
+        console.error("Failed to update Audit Log on fatal error:", logErr.message);
       }
     }
 
-    throw fatalErr; // Re-throw to trigger GitHub Action failure state
+    throw fatalErr;
   }
 }
 
-// --- Execution Entry Point ---
 main()
   .then(() => {
-    console.log("🔻 Done. Exiting process.");
+    console.log("Done. Exiting process.");
     process.exit(0);
   })
   .catch((err) => {
-    console.error("❌ Fatal execution error:", err);
+    console.error("Fatal execution error:", err);
     process.exit(1);
   });
 

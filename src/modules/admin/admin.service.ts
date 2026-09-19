@@ -399,7 +399,7 @@ export class AdminService {
     try {
       const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
       const REPO_OWNER = "seyone22";
-      const REPO_NAME = "ingredient-database-api";
+      const REPO_NAME = process.env.GITHUB_INGEST_REPO || "foodrepo-api";
 
       if (!GITHUB_TOKEN) {
         throw new Error("Missing GITHUB_TOKEN environment variable.");
@@ -443,3 +443,4 @@ export class AdminService {
     }
   }
 }
+

@@ -6,11 +6,16 @@ import * as schema from "./schema";
 export const DRIZZLE = Symbol("DRIZZLE_CONNECTION");
 export type DrizzleDb = PostgresJsDatabase<typeof schema>;
 
-function createDbInstance(): DrizzleDb {
+let _db: DrizzleDb | undefined;
+
+export function getDb(): DrizzleDb {
+  if (_db) return _db;
+
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString) {
     throw new Error("DATABASE_URL environment variable is required");
   }
+
   const client = postgres(connectionString, {
     max: 5,
     prepare: false,
@@ -18,10 +23,16 @@ function createDbInstance(): DrizzleDb {
     idle_timeout: 5,
     connect_timeout: 10,
   });
-  return drizzle(client, { schema });
+
+  _db = drizzle(client, { schema });
+  return _db;
 }
 
-export let db: DrizzleDb = process.env.DATABASE_URL ? createDbInstance() : (undefined as any);
+export const db: DrizzleDb = new Proxy({} as DrizzleDb, {
+  get(_, prop) {
+    return (getDb() as any)[prop];
+  },
+});
 
 @Global()
 @Module({
@@ -29,10 +40,7 @@ export let db: DrizzleDb = process.env.DATABASE_URL ? createDbInstance() : (unde
     {
       provide: DRIZZLE,
       useFactory: () => {
-        if (!db) {
-          db = createDbInstance();
-        }
-        return db;
+        return getDb();
       },
     },
   ],
