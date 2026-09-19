@@ -24,6 +24,14 @@ import {
   matchIngredientSchema,
   SearchIngredientsQueryDto,
   searchIngredientsQuerySchema,
+  EnrichIngredientDto,
+  enrichIngredientSchema,
+  EnhanceImageDto,
+  enhanceImageSchema,
+  ParseIngredientsDto,
+  parseIngredientsSchema,
+  ParseCameraRecipeDto,
+  parseCameraRecipeSchema,
 } from "./dto/ingredients.dto";
 import { IngredientsService } from "./ingredients.service";
 
@@ -217,26 +225,97 @@ export class IngredientsController {
     return data;
   }
 
+  @Post(":id/enrich")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: "Enrich single ingredient with AI culinary metadata",
+    description: "Generates regional, flavor, dietary, and cultural metadata using Gemini Flash.",
+  })
+  @ApiParam({ name: "id", description: "Ingredient UUID" })
+  @ApiResponse({ status: 200, description: "Enrichment completed." })
+  @ApiResponse({ status: 404, description: "Ingredient not found." })
+  async enrichSingleIngredient(@Param("id") id: string) {
+    const enriched = await this.ingredientsService.enhanceIngredients([id]);
+    if (!enriched[id]) {
+      throw new NotFoundException("Ingredient not found or enrichment failed.");
+    }
+    return { message: "Enhancement completed", enriched: enriched[id] };
+  }
+
+  @Post(":id/image")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: "Fetch and score culinary image for single ingredient",
+    description: "Runs 4-tier culinary waterfall search across Pexels, Unsplash, Wikimedia, and Open Food Facts.",
+  })
+  @ApiParam({ name: "id", description: "Ingredient UUID" })
+  @ApiResponse({ status: 200, description: "Image successfully discovered and mapped." })
+  @ApiResponse({ status: 404, description: "No suitable image found across all providers." })
+  async enrichSingleIngredientImage(@Param("id") id: string) {
+    const updated = await this.ingredientsService.enhanceIngredientImage(id);
+    if (!updated) {
+      throw new NotFoundException("No image found across all providers.");
+    }
+    return { message: "Success", ingredient: updated };
+  }
+
+  @Post("enhance")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: "Bulk AI enrichment for ingredients (Collection / Batch Action)",
+  })
+  @ApiResponse({ status: 200, description: "Bulk enrichment completed." })
+  async enhanceIngredients(
+    @Body(new ZodValidationPipe(enrichIngredientSchema))
+    dto: EnrichIngredientDto,
+  ) {
+    const ids = Array.isArray(dto.id) ? dto.id : [dto.id];
+    const enriched = await this.ingredientsService.enhanceIngredients(ids);
+    return { message: "Enhancement completed", enriched };
+  }
+
+  @Post("enhance/image")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: "Image waterfall fetch (Collection / Batch Action)",
+  })
+  @ApiResponse({ status: 200, description: "Image successfully discovered." })
+  @ApiResponse({ status: 404, description: "No image found." })
+  async enhanceIngredientImage(
+    @Body(new ZodValidationPipe(enhanceImageSchema))
+    dto: EnhanceImageDto,
+  ) {
+    const updated = await this.ingredientsService.enhanceIngredientImage(dto.id);
+    if (!updated) {
+      throw new NotFoundException("No image found across all providers.");
+    }
+    return { message: "Success", ingredient: updated };
+  }
+
   @Post("parse")
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: "Parse raw ingredient lines into structured quantities and units" })
-  async parseIngredients(@Body() body: { ingredients?: string[] }) {
-    const ingredients = body.ingredients;
-    if (!ingredients || !Array.isArray(ingredients)) {
-      throw new BadRequestException("Missing or invalid 'ingredients' array.");
-    }
-    return this.aiService.parseIngredients(ingredients);
+  @ApiOperation({
+    summary: "Parse raw ingredient strings into structured quantities and units",
+  })
+  @ApiResponse({ status: 200, description: "Structured ingredient items array." })
+  async parseIngredients(
+    @Body(new ZodValidationPipe(parseIngredientsSchema))
+    dto: ParseIngredientsDto,
+  ) {
+    return this.aiService.parseIngredients(dto.ingredients);
   }
 
   @Post("parse-recipe")
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: "Convert raw recipe text into a valid Schema.org Recipe JSON-LD" })
-  async parseCameraRecipe(@Body() body: { rawText?: string }) {
-    const rawText = body.rawText;
-    if (!rawText || typeof rawText !== "string" || !rawText.trim()) {
-      throw new BadRequestException("Missing or invalid 'rawText' field.");
-    }
-    const recipeJson = await this.aiService.parseCameraRecipeToJsonLd(rawText);
+  @ApiOperation({
+    summary: "Convert raw recipe text/OCR into Schema.org Recipe JSON-LD",
+  })
+  @ApiResponse({ status: 200, description: "Parsed Schema.org Recipe JSON." })
+  async parseCameraRecipe(
+    @Body(new ZodValidationPipe(parseCameraRecipeSchema))
+    dto: ParseCameraRecipeDto,
+  ) {
+    const recipeJson = await this.aiService.parseCameraRecipeToJsonLd(dto.rawText);
     if (!recipeJson) {
       throw new BadRequestException("Failed to parse recipe text.");
     }
@@ -245,32 +324,5 @@ export class IngredientsController {
     } catch {
       return recipeJson;
     }
-  }
-
-  @Post("enhance")
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: "Run AI enrichment on ingredients by UUID" })
-  async enhanceIngredients(@Body() body: { id?: string | string[] }) {
-    const rawId = body.id;
-    const ids = Array.isArray(rawId) ? rawId : rawId ? [rawId] : [];
-    if (!ids.length) {
-      throw new BadRequestException("No IDs provided");
-    }
-    const enriched = await this.ingredientsService.enhanceIngredients(ids);
-    return { message: "Enhancement completed", enriched };
-  }
-
-  @Post("enhance/image")
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: "Fetch and score culinary image for an ingredient" })
-  async enhanceIngredientImage(@Body() body: { id?: string }) {
-    if (!body.id) {
-      throw new BadRequestException("ID required");
-    }
-    const updated = await this.ingredientsService.enhanceIngredientImage(body.id);
-    if (!updated) {
-      throw new NotFoundException("No image found across all providers.");
-    }
-    return { message: "Success", ingredient: updated };
   }
 }

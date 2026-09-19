@@ -56,3 +56,28 @@ export const matchIngredientSchema = z.object({
 });
 
 export class MatchIngredientDto extends createZodDto(matchIngredientSchema) {}
+
+export const enrichIngredientSchema = z.object({
+  id: z.union([z.string().min(1), z.array(z.string().min(1)).min(1)]),
+});
+
+export class EnrichIngredientDto extends createZodDto(enrichIngredientSchema) {}
+
+export const enhanceImageSchema = z.object({
+  id: z.string().min(1),
+});
+
+export class EnhanceImageDto extends createZodDto(enhanceImageSchema) {}
+
+export const parseIngredientsSchema = z.object({
+  ingredients: z.array(z.string().min(1)).min(1),
+});
+
+export class ParseIngredientsDto extends createZodDto(parseIngredientsSchema) {}
+
+export const parseCameraRecipeSchema = z.object({
+  rawText: z.string().min(1),
+});
+
+export class ParseCameraRecipeDto extends createZodDto(parseCameraRecipeSchema) {}
+

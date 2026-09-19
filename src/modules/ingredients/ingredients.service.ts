@@ -22,6 +22,7 @@ import {
   type SQL,
 } from "drizzle-orm";
 import { toPgId } from "@/common/utils/uuid.util";
+import { ImageWaterfallService } from "./image-waterfall.service";
 
 type IngredientRow = typeof ingredients.$inferSelect;
 type ProductRow = typeof products.$inferSelect;
@@ -81,7 +82,7 @@ const ingredientColumns = {
 export class IngredientsService {
   private ai: GoogleGenAI | null = null;
 
-  constructor() {
+  constructor(private readonly imageWaterfallService: ImageWaterfallService) {
     const apiKey = process.env.GEMINI_API_KEY;
     if (apiKey) {
       this.ai = new GoogleGenAI({ apiKey });
@@ -797,7 +798,10 @@ Use valid JSON only.`;
     }
 
     try {
-      const imageResult = await fetchIngredientImage(ingredient.name);
+      const imageResult =
+        await this.imageWaterfallService.fetchBestCulinaryImage(
+          ingredient.name,
+        );
 
       if (!imageResult) {
         if (logId) {
@@ -895,168 +899,3 @@ function mergeArrays(existing: any[] = [], incoming: any[] = []): string[] {
   return result;
 }
 
-const BAD_KEYWORDS = [
-  "leaf",
-  "leaves",
-  "tree",
-  "plant",
-  "flower",
-  "branch",
-  "foliage",
-  "botanical",
-  "wild",
-  "garden",
-  "stem",
-  "shrub",
-  "grove",
-];
-
-const GOOD_KEYWORDS = [
-  "spice",
-  "powder",
-  "cooked",
-  "dish",
-  "bowl",
-  "ingredient",
-  "sliced",
-  "chopped",
-  "raw",
-  "fresh",
-  "ground",
-  "culinary",
-  "isolated",
-  "white background",
-  "studio",
-];
-
-function scoreCulinaryImage(
-  url: string,
-  title: string,
-  source: string,
-): number {
-  let score = 50;
-  const text = `${url} ${title}`.toLowerCase();
-  for (const bad of BAD_KEYWORDS) {
-    if (text.includes(bad)) score -= 35;
-  }
-  for (const good of GOOD_KEYWORDS) {
-    if (text.includes(good)) score += 20;
-  }
-  if (source === "pexels" || source === "unsplash") score += 25;
-  if (source === "wikimedia_commons") score += 15;
-  if (source === "openfoodfacts") score += 10;
-  return score;
-}
-
-async function fetchIngredientImage(
-  name: string,
-): Promise<{ url: string; author: string; source: string } | null> {
-  const candidates: Array<{
-    url: string;
-    author: string;
-    source: string;
-    score: number;
-    title: string;
-  }> = [];
-
-  // Pexels
-  if (process.env.PEXELS_API_KEY) {
-    try {
-      const pexelsQuery = encodeURIComponent(`${name} spice food culinary`);
-      const res = await fetch(
-        `https://api.pexels.com/v1/search?query=${pexelsQuery}&per_page=3&orientation=landscape`,
-        {
-          headers: { Authorization: process.env.PEXELS_API_KEY },
-        },
-      );
-      if (res.ok) {
-        const data = await res.json();
-        for (const photo of data.photos || []) {
-          if (photo?.src?.large) {
-            const title = photo.alt || `${name} food photo`;
-            const score = scoreCulinaryImage(photo.src.large, title, "pexels");
-            candidates.push({
-              url: photo.src.large,
-              author: `<a href="${photo.photographer_url}" target="_blank">${photo.photographer} on Pexels</a>`,
-              source: "pexels",
-              score,
-              title,
-            });
-          }
-        }
-      }
-    } catch (err) {
-      console.warn(`Pexels fetch failed for ${name}`);
-    }
-  }
-
-  // Wikimedia Commons
-  try {
-    const query = encodeURIComponent(`${name} spice food culinary isolated`);
-    const apiUrl = `https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrsearch=${query}&gsrnamespace=6&gsrlimit=4&prop=imageinfo&iiprop=url|user&format=json`;
-    const res = await fetch(apiUrl, {
-      headers: { "User-Agent": "FoodRepoBot/1.0" },
-    });
-    if (res.ok) {
-      const data = await res.json();
-      const pages = data.query?.pages || {};
-      for (const key of Object.keys(pages)) {
-        const info = pages[key]?.imageinfo?.[0];
-        const pageTitle = pages[key]?.title || "";
-        if (info?.url) {
-          const score = scoreCulinaryImage(
-            info.url,
-            pageTitle,
-            "wikimedia_commons",
-          );
-          candidates.push({
-            url: info.url,
-            author: info.user || "Wikimedia Commons",
-            source: "wikimedia_commons",
-            score,
-            title: pageTitle,
-          });
-        }
-      }
-    }
-  } catch (err) {
-    console.warn(`Wikimedia Commons search failed for ${name}`);
-  }
-
-  // Open Food Facts
-  try {
-    const query = encodeURIComponent(name);
-    const apiUrl = `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${query}&search_simple=1&action=process&json=1&page_size=2`;
-    const res = await fetch(apiUrl, {
-      headers: { "User-Agent": "FoodRepoBot/1.0 - Open Food Facts" },
-    });
-    if (res.ok) {
-      const data = await res.json();
-      for (const product of data.products || []) {
-        const imgUrl = product?.image_front_url || product?.image_url;
-        if (imgUrl) {
-          const title = product.product_name || name;
-          const score = scoreCulinaryImage(imgUrl, title, "openfoodfacts");
-          candidates.push({
-            url: imgUrl,
-            author: `Open Food Facts (${title})`,
-            source: "openfoodfacts",
-            score,
-            title,
-          });
-        }
-      }
-    }
-  } catch (err) {
-    console.warn(`Open Food Facts search failed for ${name}`);
-  }
-
-  const validCandidates = candidates.filter((c) => c.score >= 20);
-  if (validCandidates.length === 0) return null;
-  validCandidates.sort((a, b) => b.score - a.score);
-  return {
-    url: validCandidates[0].url,
-    author: validCandidates[0].author,
-    source: validCandidates[0].source,
-  };
-}
