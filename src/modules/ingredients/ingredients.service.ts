@@ -450,14 +450,11 @@ export class IngredientsService {
     // 1. Direct products for this ingredient
     const directProducts = await fetchProductsForIngredients([pgId]);
 
-    // 2. Parent category check: Does this ingredient have children in partOf?
-    let childIngredients: { id: string; name: string }[] = [];
-    if (ing.varieties && ing.varieties.length > 0) {
-      childIngredients = await db
-        .select({ id: ingredients.id, name: ingredients.name })
-        .from(ingredients)
-        .where(sql`${ingredients.partOf} @> ARRAY[${nameLower}]::text[]`);
-    }
+    // 2. Parent / Component check: Find ingredients where partOf contains this ingredient
+    const childIngredients = await db
+      .select({ id: ingredients.id, name: ingredients.name })
+      .from(ingredients)
+      .where(sql`${ingredients.partOf} @> ARRAY[${nameLower}]::text[]`);
 
     // If this ingredient is a parent with children that have products:
     if (childIngredients.length > 0) {
