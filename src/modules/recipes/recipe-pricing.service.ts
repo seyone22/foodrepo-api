@@ -845,6 +845,75 @@ export async function evaluateRecipePricing(
         }
       }
 
+      // 19. Chilli Powder vs Chilli Pieces / Flakes Granularity & Culinary Product Fidelity
+      if (
+        clean.includes("chili") ||
+        clean.includes("chilli") ||
+        clean.includes("cayenne")
+      ) {
+        const nonCulinaryChilliWords = [
+          "bite",
+          "bites",
+          "snack",
+          "snacks",
+          "chip",
+          "chips",
+          "cracker",
+          "crackers",
+          "biscuit",
+          "biscuits",
+          "peanut",
+          "peanuts",
+          "cashew",
+          "cashews",
+          "noodle",
+          "noodles",
+          "mayonnaise",
+          "mayo",
+          "cheese",
+          "spread",
+          "wedges",
+          "tuna",
+          "vodka",
+          "manioc",
+          "pakada",
+        ];
+        if (
+          nonCulinaryChilliWords.some(
+            (w) => lower.includes(w) && !clean.includes(w),
+          )
+        ) {
+          return false;
+        }
+
+        const isChilliPowderReq =
+          clean.includes("cayenne") ||
+          clean.includes("chilli powder") ||
+          clean.includes("chili powder") ||
+          clean.includes("paprika") ||
+          (clean.includes("powder") &&
+            (clean.includes("chilli") || clean.includes("chili")));
+        const isChilliPiecesReq =
+          clean.includes("piece") ||
+          clean.includes("flake") ||
+          clean.includes("crushed");
+
+        if (isChilliPowderReq && !isChilliPiecesReq) {
+          // Exclude pieces, flakes, crushed
+          const nonPowderChilliWords = [
+            "piece",
+            "pieces",
+            "flake",
+            "flakes",
+            "crushed",
+          ];
+          if (nonPowderChilliWords.some((w) => lower.includes(w))) return false;
+        } else if (isChilliPiecesReq && !isChilliPowderReq) {
+          // Exclude fine powders
+          if (lower.includes("powder")) return false;
+        }
+      }
+
       return true;
     };
 
@@ -1001,6 +1070,57 @@ export async function evaluateRecipePricing(
           "cayenne pepper",
           "chilli powder",
           "chili powder",
+          "red chili powder",
+          "red chilli powder",
+        ],
+        "chilli powder": [
+          "chilli powder",
+          "chili powder",
+          "cayenne pepper",
+          "red chilli powder",
+          "red chili powder",
+        ],
+        "chili powder": [
+          "chilli powder",
+          "chili powder",
+          "cayenne pepper",
+          "red chilli powder",
+          "red chili powder",
+        ],
+        "chilli pieces": [
+          "chili flake",
+          "chili flakes",
+          "chilli pieces",
+          "chili pieces",
+          "chilli flakes",
+          "crushed chilli",
+          "crushed red pepper",
+        ],
+        "chili pieces": [
+          "chili flake",
+          "chili flakes",
+          "chilli pieces",
+          "chili pieces",
+          "chilli flakes",
+          "crushed chilli",
+          "crushed red pepper",
+        ],
+        "chili flakes": [
+          "chili flake",
+          "chili flakes",
+          "chilli flakes",
+          "chilli pieces",
+          "chili pieces",
+          "crushed red pepper",
+          "crushed chilli",
+        ],
+        "chilli flakes": [
+          "chili flake",
+          "chili flakes",
+          "chilli flakes",
+          "chilli pieces",
+          "chili pieces",
+          "crushed red pepper",
           "crushed chilli",
         ],
         "garlic cloves": [
