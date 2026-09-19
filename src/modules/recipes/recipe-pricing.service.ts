@@ -41,6 +41,12 @@ function toBaseUnit(qty: number, rawUnit?: string): StandardizedQty {
   if (["mg", "milligram", "milligrams"].includes(u)) {
     return { qty: qty / 1000, unit: "g" };
   }
+  if (["lb", "lbs", "pound", "pounds"].includes(u)) {
+    return { qty: qty * 453.59237, unit: "g" };
+  }
+  if (["oz", "ounce", "ounces"].includes(u)) {
+    return { qty: qty * 28.34952, unit: "g" };
+  }
 
   // Volume -> ml
   if (["ml", "milliliter", "milliliters"].includes(u)) {
@@ -58,9 +64,78 @@ function toBaseUnit(qty: number, rawUnit?: string): StandardizedQty {
   if (["cup", "cups"].includes(u)) {
     return { qty: qty * 240, unit: "ml" };
   }
+  if (["fl oz", "fluid ounce", "fluid ounces"].includes(u)) {
+    return { qty: qty * 29.5735, unit: "ml" };
+  }
+  if (["pint", "pints", "pt"].includes(u)) {
+    return { qty: qty * 473.176, unit: "ml" };
+  }
+  if (["quart", "quarts", "qt"].includes(u)) {
+    return { qty: qty * 946.353, unit: "ml" };
+  }
+  if (["gallon", "gallons", "gal"].includes(u)) {
+    return { qty: qty * 3785.41, unit: "ml" };
+  }
 
   // Count / discrete units
   return { qty, unit: "unit" };
+}
+
+// ---------------------------------------------------------------------------
+// Average Piece Weights (Grams) for Discrete Produce Items
+// Bridges recipes asking for pieces/counts with products sold by weight (kg/g)
+// and vice-versa (e.g. recipe wants 1kg apples, product sold in 3-packs).
+// ---------------------------------------------------------------------------
+const AVERAGE_PIECE_WEIGHT_GRAMS: Record<string, number> = {
+  apple: 180,
+  apples: 180,
+  lemon: 60,
+  lemons: 60,
+  lime: 45,
+  limes: 45,
+  orange: 150,
+  oranges: 150,
+  banana: 120,
+  bananas: 120,
+  egg: 50,
+  eggs: 50,
+  onion: 150,
+  onions: 150,
+  "red onion": 100,
+  "big onion": 150,
+  potato: 170,
+  potatoes: 170,
+  tomato: 120,
+  tomatoes: 120,
+  garlic: 50, // 1 whole head of garlic ~ 50g
+  "garlic clove": 5,
+  "clove garlic": 5,
+  clove: 5,
+  cloves: 5,
+  carrot: 100,
+  carrots: 100,
+  cucumber: 200,
+  cucumbers: 200,
+  avocado: 200,
+  avocados: 200,
+  coconut: 600,
+  coconuts: 600,
+  bellpepper: 160,
+  "bell pepper": 160,
+  capsicum: 160,
+};
+
+function getProducePieceWeightGrams(ingredientName: string): number | null {
+  const clean = (ingredientName || "").toLowerCase().trim();
+  if (AVERAGE_PIECE_WEIGHT_GRAMS[clean]) {
+    return AVERAGE_PIECE_WEIGHT_GRAMS[clean];
+  }
+  for (const [key, weight] of Object.entries(AVERAGE_PIECE_WEIGHT_GRAMS)) {
+    if (clean.includes(key)) {
+      return weight;
+    }
+  }
+  return null;
 }
 
 function parseServingCount(raw?: number | string): number {
@@ -569,6 +644,38 @@ export async function evaluateRecipePricing(
           "chicken breast skinless",
         ],
         "olive oil": ["olive oil", "extra virgin olive oil"],
+        "double-crust pie dough": [
+          "pie dough",
+          "puff pastry dough",
+          "puff pastry sheet",
+          "pastry dough",
+          "pie crust",
+        ],
+        "double crust pie dough": [
+          "pie dough",
+          "puff pastry dough",
+          "puff pastry sheet",
+          "pastry dough",
+          "pie crust",
+        ],
+        "pie dough": [
+          "pie dough",
+          "puff pastry sheet",
+          "puff pastry dough",
+          "pastry dough",
+        ],
+        "pie crust": [
+          "pie crust",
+          "pie dough",
+          "puff pastry sheet",
+          "puff pastry dough",
+        ],
+        "pastry dough": [
+          "pie dough",
+          "puff pastry sheet",
+          "puff pastry dough",
+          "pastry dough",
+        ],
       };
 
       const GENERIC_FOOD_NOUNS = new Set([
@@ -634,7 +741,7 @@ export async function evaluateRecipePricing(
       ];
 
       for (const cand of uniqueCandidates) {
-        // Query ingredient that has mapped products
+        // Query ingredient that has mapped products (checking name and aliases)
         const candidateRows = await db
           .select({
             product: products,
@@ -649,7 +756,9 @@ export async function evaluateRecipePricing(
           )
           .innerJoin(products, eq(products.id, mappings.productId))
           .leftJoin(priceSources, eq(priceSources.id, products.sourceId))
-          .where(sql`lower(${ingredients.name}) = ${cand}`)
+          .where(
+            sql`lower(${ingredients.name}) = ${cand} OR ${cand} = ANY(SELECT lower(unnest(${ingredients.aliases})))`,
+          )
           .limit(20);
 
         const validFoodRows = candidateRows.filter((r) =>
@@ -785,10 +894,43 @@ export async function evaluateRecipePricing(
         recipeCost = (ingredientReqBase.qty / productPkgBase.qty) * unitPrice;
         basketCost = packsNeeded * unitPrice;
       } else {
-        // Unit mismatch fallback (e.g. piece count vs kg)
-        packsNeeded = 1;
-        recipeCost = unitPrice;
-        basketCost = unitPrice;
+        // Unit mismatch: check if one side is discrete pieces ("unit") and the other is mass ("g")
+        const pieceWeight =
+          getProducePieceWeightGrams(supplyName) ||
+          (rawSupply.identifier
+            ? getProducePieceWeightGrams(rawSupply.identifier)
+            : null);
+
+        if (pieceWeight && pieceWeight > 0) {
+          let reqGrams = ingredientReqBase.qty;
+          let pkgGrams = productPkgBase.qty;
+
+          // Case A: Recipe wants discrete pieces ("unit"), product is sold by mass ("g")
+          if (
+            ingredientReqBase.unit === "unit" &&
+            productPkgBase.unit === "g"
+          ) {
+            reqGrams = ingredientReqBase.qty * pieceWeight;
+          }
+          // Case B: Recipe wants mass ("g"), product is sold by discrete pieces ("unit")
+          else if (
+            ingredientReqBase.unit === "g" &&
+            productPkgBase.unit === "unit"
+          ) {
+            pkgGrams = productPkgBase.qty * pieceWeight;
+          }
+
+          if (pkgGrams > 0) {
+            packsNeeded = Math.max(1, Math.ceil(reqGrams / pkgGrams));
+            recipeCost = (reqGrams / pkgGrams) * unitPrice;
+            basketCost = packsNeeded * unitPrice;
+          }
+        } else {
+          // Fallback when no piece weight is known
+          packsNeeded = 1;
+          recipeCost = unitPrice;
+          basketCost = unitPrice;
+        }
       }
 
       const storeIdentifier =
