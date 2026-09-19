@@ -103,17 +103,22 @@ export class AdminService {
     const stats: any = statsRes[0] || {};
 
     const orphanRes = await db.execute(sql`
+      WITH mapped AS (
+        SELECT DISTINCT unnest(matched_ingredients) AS id FROM ${mappings}
+      )
       SELECT i.id, i.name, i.created_at
       FROM ${ingredients} i
-      LEFT JOIN ${mappings} m ON i.id = ANY(m.matched_ingredients)
-      WHERE m.id IS NULL
+      WHERE i.id NOT IN (SELECT id FROM mapped WHERE id IS NOT NULL)
       LIMIT 50;
     `);
+
     const orphanCountRes = await db.execute(sql`
-      SELECT COUNT(*)::int as count
+      WITH mapped AS (
+        SELECT DISTINCT unnest(matched_ingredients) AS id FROM ${mappings}
+      )
+      SELECT COUNT(*)::int AS count
       FROM ${ingredients} i
-      LEFT JOIN ${mappings} m ON i.id = ANY(m.matched_ingredients)
-      WHERE m.id IS NULL;
+      WHERE i.id NOT IN (SELECT id FROM mapped WHERE id IS NOT NULL);
     `);
     const orphanCount = (orphanCountRes[0] as any)?.count || 0;
 
@@ -125,13 +130,36 @@ export class AdminService {
     `);
     const potentialDuplicates = duplicatesRes;
 
+    const missingImage = Number(stats.missing_image || 0);
+    const missingFdc = Number(stats.missing_fdc || 0);
+    const missingComment = Number(stats.missing_comment || 0);
+    const missingVarieties = Number(stats.missing_varieties || 0);
+    const missingAliases = Number(stats.missing_aliases || 0);
+
+    const healthScore = total > 0
+      ? Math.max(0, Math.min(100, Math.round(((total - missingImage) / total) * 100)))
+      : 100;
+
+    const metrics = {
+      missingImageCount: missingImage,
+      missingFdcCount: missingFdc,
+      missingCommentCount: missingComment,
+      missingVarietiesCount: missingVarieties,
+      missingAliasesCount: missingAliases,
+      orphanCount,
+      potentialDuplicatesCount: duplicatesRes.length,
+    };
+
     return {
       total,
-      missingImage: Number(stats.missing_image),
-      missingFdc: Number(stats.missing_fdc),
-      missingComment: Number(stats.missing_comment),
-      missingVarieties: Number(stats.missing_varieties),
-      missingAliases: Number(stats.missing_aliases),
+      totalIngredients: total,
+      healthScore,
+      metrics,
+      missingImage,
+      missingFdc,
+      missingComment,
+      missingVarieties,
+      missingAliases,
       orphanIngredients: orphanRes,
       orphanCount,
       potentialDuplicates,
