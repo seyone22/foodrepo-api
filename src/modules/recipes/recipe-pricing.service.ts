@@ -140,6 +140,8 @@ const AVERAGE_PIECE_WEIGHT_GRAMS: Record<string, number> = {
   "spring onions": 15,
   "onion leaf": 15,
   "onion leaves": 15,
+  "shredded cheese": 113,
+  "grated cheese": 100,
   potato: 170,
   potatoes: 170,
   tomato: 120,
@@ -218,6 +220,8 @@ const CULINARY_DENSITY_G_PER_ML: Record<string, number> = {
   "evaporated milk": 1.07,
   water: 1.0,
   butter: 0.96,
+  "shredded cheese": 0.47,
+  "grated cheese": 0.45,
 };
 
 function getCulinaryDensity(ingredientName: string): number {
@@ -1056,6 +1060,53 @@ export async function evaluateRecipePricing(
         if (nonProduceWords.some((w) => lower.includes(w))) return false;
       }
 
+      // 21. Shredded / Grated Cheese Fidelity
+      if (
+        clean.includes("shredded cheese") ||
+        clean.includes("grated cheese") ||
+        clean.includes("shredded cheddar") ||
+        clean.includes("shredded mozzarella") ||
+        (clean.includes("shredded") && clean.includes("cheese")) ||
+        (clean.includes("grated") && clean.includes("cheese"))
+      ) {
+        // Exclude smoked cheese
+        if (lower.includes("smoke") || lower.includes("smoked")) {
+          return false;
+        }
+
+        // Exclude processed wedges, triangles, spreads, sauces, cream cheese, dips
+        const nonShreddedCheeseWords = [
+          "wedge",
+          "wedges",
+          "triangle",
+          "triangles",
+          "portion",
+          "portions",
+          "spread",
+          "sauce",
+          "cream cheese",
+          "dip",
+          "biscuit",
+          "cracker",
+          "snack",
+          "chips",
+          "popcorn",
+          "noodle",
+          "pasta",
+          "bites",
+          "murukku",
+          "tacos",
+          "burger",
+          "roll",
+          "bun",
+          "rotti",
+          "paratha",
+        ];
+        if (nonShreddedCheeseWords.some((w) => lower.includes(w))) {
+          return false;
+        }
+      }
+
       return true;
     };
 
@@ -1182,6 +1233,32 @@ export async function evaluateRecipePricing(
           "spring onion",
           "green onion",
           "scallion",
+        ],
+        "shredded cheese": [
+          "shredded mozzarella",
+          "shredded cheese",
+          "pizza cheese",
+          "grated cheese",
+          "mozzarella cheese",
+          "cheddar cheese",
+        ],
+        "grated cheese": [
+          "grated cheese",
+          "shredded cheese",
+          "parmesan cheese",
+          "mozzarella cheese",
+          "cheddar cheese",
+        ],
+        "shredded cheddar": [
+          "cheddar cheese",
+          "shredded cheese",
+          "shredded mozzarella",
+        ],
+        "shredded mozzarella": [
+          "shredded mozzarella",
+          "mozzarella cheese",
+          "pizza cheese",
+          "shredded cheese",
         ],
         "beef broth": [
           "beef stock",
