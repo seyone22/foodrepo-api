@@ -437,13 +437,21 @@ export async function evaluateRecipePricing(
         "butter knife",
         "cutlery",
         "utensil",
+        "incense",
+        "incense sticks",
+        "joss stick",
+        "candle",
+        "homeware",
+        "lighting",
+        "illumination",
+        "air freshner",
       ];
       for (const bad of nonFoodKeywords) {
         if (lower.includes(bad) && !clean.includes(bad)) return false;
       }
       if (
         catPath?.some((c) =>
-          /household|beauty|personal|cleaning|laundry|cosmetic|toiletries|pet|health|pharmacy/i.test(
+          /household|beauty|personal|cleaning|laundry|cosmetic|toiletries|pet|health|pharmacy|homeware|lighting|illumination|hardware|stationery/i.test(
             c,
           ),
         )
@@ -2125,7 +2133,7 @@ export async function evaluateRecipePricing(
             .from(products)
             .leftJoin(priceSources, eq(priceSources.id, products.sourceId))
             .leftJoin(mappings, eq(mappings.productId, products.id))
-            .where(sql`lower(${products.name}) ILIKE ${`%${cand}%`}`)
+            .where(sql`lower(${products.name}) ~* ${`\\y${cand}\\y`}`)
             .limit(20);
 
           const validDirectRows = directRows.filter((r) =>

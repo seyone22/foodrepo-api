@@ -364,8 +364,8 @@ export class GraphTraversalService {
       options.allowedSources,
     );
 
-    // 2. Child ingredients (downward aggregation - skipped if disableChildAggregation is set)
-    if (!options.disableChildAggregation) {
+    // 2. Child ingredients (downward aggregation - skipped if disableChildAggregation is set, unless directProducts is empty)
+    if (!options.disableChildAggregation || directProducts.length === 0) {
       const childIngredients = await db
         .select({ id: ingredients.id, name: ingredients.name })
         .from(ingredients)
