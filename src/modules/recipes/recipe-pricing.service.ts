@@ -256,6 +256,12 @@ const CULINARY_DENSITY_G_PER_ML: Record<string, number> = {
   "bicarbonate of soda": 1.0,
   "sodium bicarbonate": 1.0,
   "bicarbonate soda": 1.0,
+  "corn syrup": 1.40,
+  "light corn syrup": 1.40,
+  "glucose syrup": 1.40,
+  "gruyere cheese": 0.50,
+  gruyere: 0.50,
+  "swiss cheese": 0.50,
 };
 
 function getCulinaryDensity(ingredientName: string): number {
@@ -269,6 +275,93 @@ function getCulinaryDensity(ingredientName: string): number {
     }
   }
   return 1.0; // Default: 1 ml ≈ 1 g
+}
+
+const PRODUCE_NAMES = new Set([
+  "apple", "apples", "orange", "oranges", "banana", "bananas", "grape", "grapes",
+  "mango", "mangoes", "papaya", "watermelon", "pineapple", "guava", "avocado", "avocados",
+  "lime", "limes", "lemon", "lemons", "pear", "pears", "strawberry", "strawberries",
+  "potato", "potatoes", "onion", "onions", "red onion", "big onion", "spring onion",
+  "tomato", "tomatoes", "carrot", "carrots", "cabbage", "cabbages", "beetroot",
+  "pumpkin", "cucumber", "cucumbers", "capsicum", "bell pepper", "leeks", "radish",
+  "beans", "green beans", "chilli", "green chilli", "ginger", "garlic", "spinach",
+  "mukunuwenna", "gotukola", "kankun", "dhal", "rice"
+]);
+
+function isLooseProduce(
+  productName: string,
+  unit?: string | null,
+  categoryPath?: string[] | null,
+): boolean {
+  const pName = productName.toLowerCase().trim();
+
+  // If explicitly bulk in supermarket naming (e.g., "White Sugar Bulk kg", "Apple Bulk")
+  if (pName.includes("bulk")) return true;
+
+  // Packaging keywords that signify sealed retail packaging
+  const packagedKeywords = [
+    "packet", "pkt", "pack", "3's", "4's", "5's", "6's", "10's", "12's",
+    "bottle", "bott", "can", "tin", "jar", "box", "net", "tray", "sachet",
+    "tetra", "pouch", "bag", "display", "sheet", "tub", "container", "portion",
+    "block", "bar", "slab", "roll", "piece", "pcs"
+  ];
+  if (packagedKeywords.some((kw) => pName.includes(kw))) {
+    return false;
+  }
+
+  // Must not be dairy, spices, confectionery, oils, extracts
+  const nonProduceKeywords = [
+    "butter", "cheese", "milk", "curd", "yogurt", "cream", "ghee", "oil",
+    "extract", "essence", "powder", "sauce", "paste", "jam", "jelly", "chutney",
+    "syrup", "juice", "drink", "biscuit", "cookie", "cake", "bun", "flour"
+  ];
+  if (nonProduceKeywords.some((kw) => pName.includes(kw))) {
+    return false;
+  }
+
+  // Check produce category
+  const isProduceCategory =
+    Array.isArray(categoryPath) &&
+    categoryPath.some((c) => {
+      const cLow = c.toLowerCase();
+      return (
+        cLow.includes("vegetable") ||
+        cLow.includes("fruit") ||
+        cLow.includes("fresh produce") ||
+        cLow.includes("fresh fruits") ||
+        cLow.includes("fresh vegetables")
+      );
+    });
+
+  // Check if product name matches known fresh produce items
+  const matchesProduceName = Array.from(PRODUCE_NAMES).some((p) => {
+    const regex = new RegExp(`\\b${p}\\b`, "i");
+    return regex.test(pName);
+  });
+
+  return isProduceCategory || matchesProduceName;
+}
+
+function extractProductImage(product: {
+  raw?: string | null;
+  url?: string | null;
+}): string | null {
+  if (product.raw) {
+    try {
+      const raw = JSON.parse(product.raw);
+      if (typeof raw.image === "string" && raw.image.startsWith("http")) return raw.image;
+      if (typeof raw.imageUrl === "string" && raw.imageUrl.startsWith("http")) return raw.imageUrl;
+      if (Array.isArray(raw.images) && raw.images.length > 0) {
+        const first = raw.images[0];
+        if (typeof first === "string" && first.startsWith("http")) return first;
+        if (first?.src && typeof first.src === "string" && first.src.startsWith("http")) return first.src;
+      }
+    } catch {}
+  }
+  if (product.url && /\.(jpg|jpeg|png|webp)(\?|$)/i.test(product.url)) {
+    return product.url;
+  }
+  return null;
 }
 
 function parseServingCount(raw?: number | string): number {
@@ -445,13 +538,25 @@ export async function evaluateRecipePricing(
         "lighting",
         "illumination",
         "air freshner",
+        "cough syrup",
+        "blood glucose",
+        "herbal cough",
+        "balm",
+        "ointment",
+        "inhaler",
+        "decor",
+        "decoration",
+        "ornament",
+        "hanging deco",
+        "toy",
+        "figurine",
       ];
       for (const bad of nonFoodKeywords) {
         if (lower.includes(bad) && !clean.includes(bad)) return false;
       }
       if (
         catPath?.some((c) =>
-          /household|beauty|personal|cleaning|laundry|cosmetic|toiletries|pet|health|pharmacy|homeware|lighting|illumination|hardware|stationery/i.test(
+          /household|beauty|personal|cleaning|laundry|cosmetic|toiletries|pet|health|pharmacy|homeware|lighting|illumination|hardware|stationery|decor|gift|toy|festive/i.test(
             c,
           ),
         )
@@ -515,6 +620,28 @@ export async function evaluateRecipePricing(
           "dessert",
         ];
         if (nonDairyCreamWords.some((w) => lower.includes(w))) return false;
+      }
+
+      // 2b. Cookies / Biscuits / Oreos (exclude ice creams, dessert bars, cones, cakes)
+      if (clean.includes("cookie") || clean.includes("biscuit") || clean.includes("oreo")) {
+        const nonCookieWords = [
+          "ice cream",
+          "i/c",
+          "cone",
+          "sundae",
+          "shake",
+          "beverage",
+          "drink",
+          "chilled",
+          "soap",
+          "bag",
+          "cake",
+        ];
+        if (nonCookieWords.some((w) => lower.includes(w) && !clean.includes(w))) return false;
+        if (catPath?.some((c) => /ice cream|dairy|frozen dessert/i.test(c))) {
+          // If explicitly marked as ice cream category, reject for cookie
+          if (!lower.includes("biscuit") && !lower.includes("cookie")) return false;
+        }
       }
 
       // 3. Vanilla Extract / Essence (exclude vanilla ice creams/milks/wafers)
@@ -619,6 +746,21 @@ export async function evaluateRecipePricing(
           catPath?.some((c) => /confectionery|chocolate|biscuit|sweet/i.test(c))
         ) {
           return false;
+        }
+
+        // Whole milk fidelity: if recipe requests whole milk or full cream milk, reject skim/non-fat/low-fat
+        if (clean.includes("whole milk") || clean.includes("full cream")) {
+          const nonWholeMilkWords = [
+            "non fat",
+            "non-fat",
+            "skim",
+            "skimmed",
+            "low fat",
+            "low-fat",
+            "fat free",
+            "fat-free",
+          ];
+          if (nonWholeMilkWords.some((w) => lower.includes(w))) return false;
         }
       }
 
@@ -759,7 +901,7 @@ export async function evaluateRecipePricing(
         }
       }
 
-      // 12. Pie Crust / Pie Dough / Pastry (exclude bread, buns, toast, rusks)
+      // 12. Pie Crust / Pie Dough / Pastry (exclude bread, buns, toast, rusks, cakes, confectionery)
       if (
         clean.includes("crust") ||
         clean.includes("dough") ||
@@ -774,6 +916,11 @@ export async function evaluateRecipePricing(
           "bun",
           "rusk",
           "toast",
+          "choco pie",
+          "pie cake",
+          "biscuit",
+          "wafer",
+          "confectionery",
         ];
         if (nonPastryWords.some((w) => lower.includes(w))) return false;
       }
@@ -1442,6 +1589,11 @@ export async function evaluateRecipePricing(
           "knife",
           "shortbread",
           "b/butter",
+          "garlic butter",
+          "garlic",
+          "herb butter",
+          "chilli butter",
+          "chili butter",
         ];
         if (
           nonButterKeywords.some(
@@ -1465,6 +1617,131 @@ export async function evaluateRecipePricing(
         }
       }
 
+      // 27. Culinary Syrups / Corn Syrup / Glucose Syrup (exclude cough syrup, pharma, machine)
+      const isSyrupReq =
+        clean.includes("syrup") ||
+        clean.includes("treacle") ||
+        clean.includes("glucose");
+      if (isSyrupReq) {
+        const nonCulinarySyrupWords = [
+          "cough",
+          "herbal",
+          "pharma",
+          "machine",
+          "monitor",
+          "active blood",
+          "blood glucose",
+          "test strip",
+          "strip",
+          "balm",
+          "ointment",
+          "pain",
+          "cold",
+          "flu",
+          "fever",
+          "panadol",
+          "paracetamol",
+          "thulasi",
+          "pawatta",
+          "siddhalepa",
+          "nivaran",
+          "valmelix",
+          "morisons",
+          "zincovit",
+          "immuno",
+        ];
+        if (nonCulinarySyrupWords.some((w) => lower.includes(w))) return false;
+        if (
+          catPath?.some((c) => /pharmacy|health|medicine|medical|equipment/i.test(c))
+        ) {
+          return false;
+        }
+      }
+
+      // 28. Gruyere / Swiss Cheese Fidelity (exclude feta, cream cheese, swiss roll cakes, processed spreads)
+      const isGruyereReq =
+        clean.includes("gruyere") ||
+        clean.includes("swiss cheese");
+      if (isGruyereReq) {
+        const nonGruyereWords = [
+          "feta",
+          "cream cheese",
+          "paneer",
+          "swiss roll",
+          "roll",
+          "cake",
+          "curd",
+          "cheese cutz",
+          "cutz",
+          "triangle",
+          "spread",
+          "wedges",
+          "macaroni",
+          "mac cheese",
+        ];
+        if (nonGruyereWords.some((w) => lower.includes(w))) return false;
+      }
+
+      // 29. Corn Syrup / Glucose Syrup Fidelity (exclude treacle / kithul / molasses)
+      const isCornSyrupReq =
+        clean.includes("corn syrup") ||
+        clean.includes("glucose syrup") ||
+        clean.includes("liquid glucose");
+      if (isCornSyrupReq) {
+        if (
+          lower.includes("treacle") ||
+          lower.includes("kithul") ||
+          lower.includes("molasses")
+        ) {
+          return false;
+        }
+      }
+
+      // 30. Fresh Berries / Blueberries Fidelity (exclude biscuits, snack bites, jellies, sodas, yoghurt drinks)
+      const isBerryReq =
+        clean.includes("blueberry") ||
+        clean.includes("blueberries") ||
+        clean.includes("strawberry") ||
+        clean.includes("strawberries") ||
+        clean.includes("raspberry") ||
+        clean.includes("raspberries") ||
+        clean.includes("blackberry") ||
+        clean.includes("blackberries");
+      if (isBerryReq) {
+        const nonFreshBerryWords = [
+          "bites",
+          "filla bites",
+          "biscuit",
+          "biscuits",
+          "cookie",
+          "cookies",
+          "cracker",
+          "crackers",
+          "cake",
+          "muffin",
+          "cone",
+          "lollipop",
+          "candy",
+          "chocolate",
+          "jelly",
+          "cola",
+          "soda",
+          "drink",
+          "yoghurt",
+          "yogurt",
+          "cereal bar",
+          "bars",
+          "cheese block",
+        ];
+        if (
+          nonFreshBerryWords.some(
+            (w) => lower.includes(w) && !clean.includes(w),
+          )
+        ) {
+          return false;
+        }
+      }
+
       return true;
     };
 
@@ -1477,7 +1754,6 @@ export async function evaluateRecipePricing(
       try {
         traversal = await graphTraversal.resolveByIngredientId(rawSupply.identifier, {
           allowedSources: allowedSources || undefined,
-          disableChildAggregation: true,
         });
         if (
           traversal &&
@@ -1957,6 +2233,51 @@ export async function evaluateRecipePricing(
         "unsalted butter": [
           "butter",
         ],
+        "oreo cookies": [
+          "oreo",
+          "oreo biscuit",
+          "oreo cookie",
+        ],
+        "oreo cookie": [
+          "oreo",
+          "oreo biscuit",
+        ],
+        "oreo": [
+          "oreo biscuit",
+          "oreo cookie",
+        ],
+        "light corn syrup": [
+          "glucose syrup",
+          "liquid glucose",
+          "corn syrup",
+          "golden syrup",
+        ],
+        "corn syrup": [
+          "glucose syrup",
+          "liquid glucose",
+          "golden syrup",
+        ],
+        "gruyere cheese": [
+          "gruyere",
+          "gruye",
+          "swiss cheese",
+          "emmental",
+          "cheese block swiss",
+        ],
+        gruyere: [
+          "gruyere cheese",
+          "gruye",
+          "swiss cheese",
+          "emmental",
+          "cheese block swiss",
+        ],
+        "whole milk": [
+          "fresh milk",
+          "pasteurized fresh milk",
+          "full cream fresh milk",
+          "uht milk",
+          "milk",
+        ],
       };
 
       const GENERIC_FOOD_NOUNS = new Set([
@@ -2028,19 +2349,39 @@ export async function evaluateRecipePricing(
       ];
 
       // 1. Primary traversal on clean supply name
-      traversal = await graphTraversal.resolveByNameOrQuery(clean, {
+      let rawTraversal = await graphTraversal.resolveByNameOrQuery(clean, {
         allowedSources: allowedSources || undefined,
-        disableChildAggregation: true,
       });
+      if (
+        rawTraversal &&
+        rawTraversal.products.some((p) => isFoodProduct(p.name, p.categoryPath))
+      ) {
+        traversal = rawTraversal;
+      }
 
-      // 2. Synonyms traversal
-      if ((!traversal || traversal.products.length === 0) && SYNONYMS[clean]) {
+      // 2. Synonyms traversal: if primary traversal found no products or only resolved to a generic parent/ancestor or non-food items
+      if (
+        (!traversal ||
+          traversal.products.length === 0 ||
+          traversal.relation === "parent" ||
+          traversal.relation === "ancestor") &&
+        SYNONYMS[clean]
+      ) {
         for (const syn of SYNONYMS[clean]) {
-          traversal = await graphTraversal.resolveByNameOrQuery(syn, {
+          const synTraversal = await graphTraversal.resolveByNameOrQuery(syn, {
             allowedSources: allowedSources || undefined,
-            disableChildAggregation: true,
           });
-          if (traversal && traversal.products.length > 0) break;
+          if (
+            synTraversal &&
+            synTraversal.products.some((p) => isFoodProduct(p.name, p.categoryPath)) &&
+            (synTraversal.relation === "direct" ||
+              synTraversal.relation === "derivative" ||
+              !traversal ||
+              traversal.products.length === 0)
+          ) {
+            traversal = synTraversal;
+            break;
+          }
         }
       }
 
@@ -2048,11 +2389,16 @@ export async function evaluateRecipePricing(
       if (!traversal || traversal.products.length === 0) {
         for (const cand of uniqueCandidates) {
           if (cand === clean) continue;
-          traversal = await graphTraversal.resolveByNameOrQuery(cand, {
+          const candTraversal = await graphTraversal.resolveByNameOrQuery(cand, {
             allowedSources: allowedSources || undefined,
-            disableChildAggregation: true,
           });
-          if (traversal && traversal.products.length > 0) break;
+          if (
+            candTraversal &&
+            candTraversal.products.some((p) => isFoodProduct(p.name, p.categoryPath))
+          ) {
+            traversal = candTraversal;
+            break;
+          }
         }
       }
 
@@ -2209,6 +2555,9 @@ export async function evaluateRecipePricing(
       const unitPrice = priceRecord ? priceRecord.latestPrice : product.price;
       const currency = priceRecord?.currency || product.currency || "LKR";
 
+      // Ignore zero-priced or unpriced mock/error items
+      if (!unitPrice || unitPrice <= 0) continue;
+
       // Normalize package size
       let normalizedPkg = { quantity: 1, unit: "unit" };
       try {
@@ -2320,6 +2669,22 @@ export async function evaluateRecipePricing(
         }
       }
 
+      // Loose produce scale billing:
+      // If the product is loose produce sold continuously by weight at the supermarket scale,
+      // basketCost is exactly proportional to required amount (recipeCost) rather than forced to discrete pack ceilings.
+      const isLoose = isLooseProduce(product.name, product.unit, product.categoryPath);
+      let isLooseWeight = false;
+
+      if (
+        isLoose &&
+        (ingredientReqBase.unit === "g" || ingredientReqBase.unit === "ml") &&
+        (productPkgBase.unit === "g" || productPkgBase.unit === "ml")
+      ) {
+        isLooseWeight = true;
+        packsNeeded = 1;
+        basketCost = recipeCost;
+      }
+
       const storeIdentifier =
         source?.name?.toLowerCase().replace(/\s+/g, "-") || "unknown";
 
@@ -2336,6 +2701,7 @@ export async function evaluateRecipePricing(
           sku: product.sku || product.externalId || null,
           url: product.url || null,
           brand: product.brand || null,
+          image: extractProductImage(product),
         },
         price: unitPrice,
         priceCurrency: currency,
@@ -2358,6 +2724,7 @@ export async function evaluateRecipePricing(
         packsNeeded,
         recipeCost: Math.round(recipeCost * 100) / 100,
         basketCost: Math.round(basketCost * 100) / 100,
+        isLooseWeight,
       };
 
       candidateOffers.push(offer);

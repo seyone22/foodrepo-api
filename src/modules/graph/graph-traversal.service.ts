@@ -345,7 +345,7 @@ export class GraphTraversalService {
 
     const ing = await db.query.ingredients.findFirst({
       where: eq(ingredients.id, pgId),
-      columns: { id: true, name: true, partOf: true, derivatives: true, substitutes: true, density: true },
+      columns: { id: true, name: true, partOf: true, varieties: true, derivatives: true, substitutes: true, density: true },
     });
 
     if (!ing) return null;
@@ -364,12 +364,20 @@ export class GraphTraversalService {
       options.allowedSources,
     );
 
-    // 2. Child ingredients (downward aggregation - skipped if disableChildAggregation is set, unless directProducts is empty)
+    // 2. Child ingredients (downward aggregation via declared varieties)
     if (!options.disableChildAggregation || directProducts.length === 0) {
-      const childIngredients = await db
-        .select({ id: ingredients.id, name: ingredients.name })
-        .from(ingredients)
-        .where(sql`${ingredients.partOf} @> ARRAY[${nameLower}]::text[]`);
+      let childIngredients: { id: string; name: string }[] = [];
+      if (ing.varieties && Array.isArray(ing.varieties) && ing.varieties.length > 0) {
+        const declaredVars = ing.varieties
+          .filter(Boolean)
+          .map((v) => v.trim().toLowerCase());
+        if (declaredVars.length > 0) {
+          childIngredients = await db
+            .select({ id: ingredients.id, name: ingredients.name })
+            .from(ingredients)
+            .where(inArray(sql`lower(${ingredients.name})`, declaredVars));
+        }
+      }
 
     if (childIngredients.length > 0) {
       const childIds = childIngredients.map((c) => c.id);

@@ -46,6 +46,7 @@ export interface Offer {
   packsNeeded?: number;
   recipeCost?: number;
   basketCost?: number;
+  isLooseWeight?: boolean;
 }
 
 export interface SupplyFulfillment {
