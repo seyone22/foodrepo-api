@@ -64,6 +64,7 @@ export interface HowToSupply {
   "@type"?: "HowToSupply";
   name: string;
   identifier?: string | null; // Canonical FoodRepo UUID if known
+  image?: string | null;
   requiredQuantity?: QuantitativeValue;
   offers?: Offer[];
   status?: "priced" | "unpriced" | "excluded";

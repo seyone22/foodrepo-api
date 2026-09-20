@@ -262,6 +262,10 @@ const CULINARY_DENSITY_G_PER_ML: Record<string, number> = {
   "gruyere cheese": 0.50,
   gruyere: 0.50,
   "swiss cheese": 0.50,
+  "oyster sauce": 1.25,
+  "soy sauce": 1.15,
+  "fish sauce": 1.20,
+  "worcestershire sauce": 1.15,
 };
 
 function getCulinaryDensity(ingredientName: string): number {
@@ -442,6 +446,7 @@ export async function evaluateRecipePricing(
         "@type": "HowToSupply",
         name: supplyName,
         identifier: rawSupply.identifier || null,
+        image: rawSupply.image || null,
         requiredQuantity: {
           "@type": "QuantitativeValue",
           value: scaledQty,
@@ -1742,6 +1747,24 @@ export async function evaluateRecipePricing(
         }
       }
 
+      // 31. Oyster Sauce vs Oyster Mushroom vs Shellfish Oyster Fidelity
+      if (clean.includes("oyster sauce") || clean.includes("oyster-sauce")) {
+        if (
+          lower.includes("mushroom") ||
+          lower.includes("mushrooms") ||
+          lower.includes("fresh") ||
+          lower.includes("bulk") ||
+          lower.includes("raw") ||
+          (catPath && catPath.some((c) => c.toLowerCase().includes("vegetable") || c.toLowerCase().includes("fruit")))
+        ) {
+          return false;
+        }
+      } else if (clean.includes("mushroom")) {
+        if (lower.includes("sauce") && !clean.includes("sauce")) {
+          return false;
+        }
+      }
+
       return true;
     };
 
@@ -2500,6 +2523,39 @@ export async function evaluateRecipePricing(
       }
     }
 
+    // Resolve canonical ingredient image if not already provided
+    let ingredientImageUrl: string | null = baseSupply.image || null;
+    if (!ingredientImageUrl && traversal?.ingredientImage) {
+      ingredientImageUrl = traversal.ingredientImage;
+    }
+    if (!ingredientImageUrl && traversal?.sourceIngredient?.image) {
+      ingredientImageUrl = traversal.sourceIngredient.image;
+    }
+    if (!ingredientImageUrl && (resolvedId || baseSupply.identifier)) {
+      try {
+        const pgId = toPgId(resolvedId || baseSupply.identifier!);
+        const ingRow = await db.query.ingredients.findFirst({
+          where: eq(ingredients.id, pgId),
+          columns: { image: true },
+        });
+        if (ingRow?.image?.url && !ingRow.image.missing) {
+          ingredientImageUrl = ingRow.image.url;
+        }
+      } catch {}
+    }
+    if (!ingredientImageUrl && clean) {
+      try {
+        const ingRow = await db.query.ingredients.findFirst({
+          where: sql`lower(${ingredients.name}) = ${clean}`,
+          columns: { image: true },
+        });
+        if (ingRow?.image?.url && !ingRow.image.missing) {
+          ingredientImageUrl = ingRow.image.url;
+        }
+      } catch {}
+    }
+    baseSupply.image = ingredientImageUrl || null;
+
     // Filter by allowed sources
     const filteredMapped = allowedSources
       ? mappedData.filter((m) => {
@@ -2701,7 +2757,7 @@ export async function evaluateRecipePricing(
           sku: product.sku || product.externalId || null,
           url: product.url || null,
           brand: product.brand || null,
-          image: extractProductImage(product),
+          image: extractProductImage(product) || ingredientImageUrl || null,
         },
         price: unitPrice,
         priceCurrency: currency,

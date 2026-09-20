@@ -35,11 +35,13 @@ export interface DerivativeMatchMetadata {
 export interface TraversalResolution {
   ingredientId: string;
   ingredientName: string;
+  ingredientImage?: string | null;
   relation: "direct" | "child" | "parent" | "ancestor" | "derivative" | "substitute";
   level?: number;
   sourceIngredient?: {
     id: string;
     name: string;
+    image?: string | null;
   };
   derivative?: DerivativeMatchMetadata;
   density?: number;
@@ -345,10 +347,12 @@ export class GraphTraversalService {
 
     const ing = await db.query.ingredients.findFirst({
       where: eq(ingredients.id, pgId),
-      columns: { id: true, name: true, partOf: true, varieties: true, derivatives: true, substitutes: true, density: true },
+      columns: { id: true, name: true, image: true, partOf: true, varieties: true, derivatives: true, substitutes: true, density: true },
     });
 
     if (!ing) return null;
+
+    const ingImage = ing.image?.url && !ing.image.missing ? ing.image.url : null;
 
     const resolvedDensity = await this.resolveIngredientDensity(
       ing.id,
@@ -437,6 +441,7 @@ export class GraphTraversalService {
           return {
             ingredientId: ing.id,
             ingredientName: ing.name,
+            ingredientImage: ingImage,
             relation: "child",
             density: resolvedDensity,
             products: categorizedProducts,
@@ -451,6 +456,7 @@ export class GraphTraversalService {
       return {
         ingredientId: ing.id,
         ingredientName: ing.name,
+        ingredientImage: ingImage,
         relation: "direct",
         density: resolvedDensity,
         products: directProducts,
@@ -480,7 +486,7 @@ export class GraphTraversalService {
 
         const subIng = await db.query.ingredients.findFirst({
           where: sql`LOWER(${ingredients.name}) = ${subClean}`,
-          columns: { id: true, name: true, density: true },
+          columns: { id: true, name: true, image: true, density: true },
         });
 
         if (subIng) {
@@ -495,13 +501,19 @@ export class GraphTraversalService {
             (subResolution.relation === "direct" ||
               subResolution.relation === "child")
           ) {
+            const subImage =
+              subIng.image?.url && !subIng.image.missing
+                ? subIng.image.url
+                : null;
             return {
               ingredientId: ing.id,
               ingredientName: ing.name,
+              ingredientImage: ingImage || subImage,
               relation: "substitute",
               sourceIngredient: {
                 id: subIng.id,
                 name: subIng.name,
+                image: subImage,
               },
               density: resolvedDensity ?? subResolution.density,
               products: subResolution.products,
@@ -539,7 +551,7 @@ export class GraphTraversalService {
 
         const parentIng = await db.query.ingredients.findFirst({
           where: sql`LOWER(${ingredients.name}) = ${parentName}`,
-          columns: { id: true, name: true, partOf: true },
+          columns: { id: true, name: true, image: true, partOf: true },
         });
 
         if (parentIng) {
@@ -548,14 +560,20 @@ export class GraphTraversalService {
             options.allowedSources,
           );
           if (parentProducts.length > 0) {
+            const parentImage =
+              parentIng.image?.url && !parentIng.image.missing
+                ? parentIng.image.url
+                : null;
             return {
               ingredientId: ing.id,
               ingredientName: ing.name,
+              ingredientImage: ingImage || parentImage,
               relation: level === 1 ? "parent" : "ancestor",
               level,
               sourceIngredient: {
                 id: parentIng.id,
                 name: parentIng.name,
+                image: parentImage,
               },
               density: resolvedDensity,
               products: parentProducts,
@@ -601,7 +619,7 @@ export class GraphTraversalService {
     if (!clean || clean.length < 3) return null;
 
     const query = sql`
-      SELECT id, name, derivatives, density
+      SELECT id, name, derivatives, density, image
       FROM foodrepo.ingredients
       WHERE derivatives IS NOT NULL
         AND jsonb_typeof(derivatives) = 'array'
@@ -643,13 +661,18 @@ export class GraphTraversalService {
           });
         }
 
+        const rowImage =
+          row.image?.url && !row.image.missing ? row.image.url : null;
+
         return {
           ingredientId: row.id,
           ingredientName: row.name,
+          ingredientImage: rowImage,
           relation: "derivative",
           sourceIngredient: {
             id: row.id,
             name: row.name,
+            image: rowImage,
           },
           derivative: matchedDerivative,
           density: row.density != null ? Number(row.density) : 1.0,
