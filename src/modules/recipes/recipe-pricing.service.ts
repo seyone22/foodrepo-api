@@ -250,6 +250,12 @@ const CULINARY_DENSITY_G_PER_ML: Record<string, number> = {
   "nacho chips": 0.20,
   "corn chips": 0.25,
   tortilla: 0.50,
+  "baking powder": 0.90,
+  "double acting baking powder": 0.90,
+  "baking soda": 1.0,
+  "bicarbonate of soda": 1.0,
+  "sodium bicarbonate": 1.0,
+  "bicarbonate soda": 1.0,
 };
 
 function getCulinaryDensity(ingredientName: string): number {
@@ -1287,6 +1293,70 @@ export async function evaluateRecipePricing(
         }
       }
 
+      // 25. Chemical Leaveners Fidelity (Baking Powder / Baking Soda / Bicarbonate)
+      const isBakingPowderReq =
+        clean.includes("baking powder") ||
+        clean.includes("baking powders") ||
+        clean.includes("double acting baking powder");
+      const isBakingSodaReq =
+        clean.includes("baking soda") ||
+        clean.includes("bicarbonate") ||
+        clean.includes("bicarb");
+
+      if (isBakingPowderReq || isBakingSodaReq) {
+        // Exclude flour mixtures, snack mixtures, gripe water, paper/cups, fats, detergents
+        const nonLeavenerWords = [
+          "pittu",
+          "thosai",
+          "dosa",
+          "hopper",
+          "cake mix",
+          "snack",
+          "cocktail",
+          "devilled",
+          "indian mixture",
+          "gripe",
+          "paper",
+          "cup",
+          "cups",
+          "foil",
+          "margarine",
+          "fat",
+          "flour",
+          "batter",
+          "seasoning",
+          "detergent",
+          "wash",
+          "washing",
+          "curry",
+          "drink",
+        ];
+        if (
+          nonLeavenerWords.some(
+            (w) => lower.includes(w) && !clean.includes(w),
+          )
+        ) {
+          return false;
+        }
+
+        if (isBakingPowderReq) {
+          const hasBakingPowder =
+            lower.includes("baking powder") ||
+            lower.includes("baking-powder");
+          if (!hasBakingPowder) {
+            return false;
+          }
+        } else if (isBakingSodaReq) {
+          const hasBakingSoda =
+            lower.includes("baking soda") ||
+            lower.includes("bicarbonate") ||
+            lower.includes("bicarb");
+          if (!hasBakingSoda) {
+            return false;
+          }
+        }
+      }
+
       return true;
     };
 
@@ -1752,6 +1822,20 @@ export async function evaluateRecipePricing(
         "corn chip": [
           "tortilla chips",
           "nacho chips",
+        ],
+        "baking powder": [
+          "double acting baking powder",
+          "baking powders",
+        ],
+        "baking soda": [
+          "bicarbonate of soda",
+          "sodium bicarbonate",
+          "bicarb soda",
+        ],
+        "bicarbonate of soda": [
+          "baking soda",
+          "sodium bicarbonate",
+          "bicarb soda",
         ],
       };
 

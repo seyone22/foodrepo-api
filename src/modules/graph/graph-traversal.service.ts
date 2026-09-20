@@ -162,6 +162,12 @@ export const ABSTRACT_TAXONOMY_BLACKLIST = new Set([
   "seeds",
   "filling",
   "sauce",
+  "mixture",
+  "mixtures",
+  "mix",
+  "mixes",
+  "baking",
+  "soda",
 ]);
 
 @Injectable()
