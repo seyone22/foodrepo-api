@@ -49,7 +49,7 @@ export interface Offer {
 }
 
 export interface SupplyFulfillment {
-  strategy: "direct" | "derivative" | "child" | "parent" | "ancestor";
+  strategy: "direct" | "derivative" | "child" | "parent" | "ancestor" | "substitute";
   sourceIngredient?: string;
   sourceIngredientId?: string;
   process?: string | null;

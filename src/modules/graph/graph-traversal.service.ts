@@ -35,7 +35,7 @@ export interface DerivativeMatchMetadata {
 export interface TraversalResolution {
   ingredientId: string;
   ingredientName: string;
-  relation: "direct" | "child" | "parent" | "ancestor" | "derivative";
+  relation: "direct" | "child" | "parent" | "ancestor" | "derivative" | "substitute";
   level?: number;
   sourceIngredient?: {
     id: string;
@@ -51,6 +51,7 @@ export interface TraversalOptions {
   allowedSources?: string[];
   maxAncestorLevel?: number;
   includeDerivatives?: boolean;
+  includeSubstitutes?: boolean;
   disableChildAggregation?: boolean;
 }
 
@@ -338,7 +339,7 @@ export class GraphTraversalService {
 
     const ing = await db.query.ingredients.findFirst({
       where: eq(ingredients.id, pgId),
-      columns: { id: true, name: true, partOf: true, derivatives: true, density: true },
+      columns: { id: true, name: true, partOf: true, derivatives: true, substitutes: true, density: true },
     });
 
     if (!ing) return null;
@@ -450,6 +451,49 @@ export class GraphTraversalService {
       );
       if (derivativeParent && derivativeParent.products.length > 0) {
         return derivativeParent;
+      }
+    }
+
+    // 3.5. Substitutes traversal: If direct products, children, and derivatives have no products, check explicit substitutes
+    if (
+      options.includeSubstitutes !== false &&
+      ing.substitutes &&
+      Array.isArray(ing.substitutes)
+    ) {
+      for (const subName of ing.substitutes) {
+        const subClean = subName.trim().toLowerCase();
+        if (!subClean || ABSTRACT_TAXONOMY_BLACKLIST.has(subClean)) continue;
+
+        const subIng = await db.query.ingredients.findFirst({
+          where: sql`LOWER(${ingredients.name}) = ${subClean}`,
+          columns: { id: true, name: true, density: true },
+        });
+
+        if (subIng) {
+          const subResolution = await this.resolveByIngredientId(subIng.id, {
+            ...options,
+            includeSubstitutes: false,
+          });
+
+          if (
+            subResolution &&
+            subResolution.products.length > 0 &&
+            (subResolution.relation === "direct" ||
+              subResolution.relation === "child")
+          ) {
+            return {
+              ingredientId: ing.id,
+              ingredientName: ing.name,
+              relation: "substitute",
+              sourceIngredient: {
+                id: subIng.id,
+                name: subIng.name,
+              },
+              density: resolvedDensity ?? subResolution.density,
+              products: subResolution.products,
+            };
+          }
+        }
       }
     }
 
@@ -614,7 +658,7 @@ export class GraphTraversalService {
     if (!clean) return null;
 
     const sourcesKey = options.allowedSources ? [...options.allowedSources].sort().join(",") : "";
-    const cacheKey = `${clean}::child=${options.disableChildAggregation ? 1 : 0}::deriv=${options.includeDerivatives === false ? 0 : 1}::src=${sourcesKey}::max=${options.maxAncestorLevel ?? 4}`;
+    const cacheKey = `${clean}::child=${options.disableChildAggregation ? 1 : 0}::deriv=${options.includeDerivatives === false ? 0 : 1}::sub=${options.includeSubstitutes === false ? 0 : 1}::src=${sourcesKey}::max=${options.maxAncestorLevel ?? 4}`;
 
     if (this.resolutionCache.has(cacheKey)) {
       return this.resolutionCache.get(cacheKey)!;

@@ -858,7 +858,15 @@ export async function evaluateRecipePricing(
           return false;
         }
 
-        // If product mentions fresh meat or poultry, it MUST be an actual broth/stock preparation (stock powder, cube, soup bone, essence)
+        // Raw bones are not broth or stock
+        if (
+          (lower.includes("bone") || lower.includes("bones")) &&
+          !clean.includes("bone")
+        ) {
+          return false;
+        }
+
+        // If product mentions fresh meat or poultry, it MUST be an actual broth/stock preparation (stock powder, cube, essence)
         const meatWords = [
           "chicken",
           "beef",
@@ -879,10 +887,6 @@ export async function evaluateRecipePricing(
             "cubes",
             "powder",
             "seasoning",
-            "soup bone",
-            "soup bones",
-            "bones",
-            "bone",
             "extract",
             "essence",
             "soup",
@@ -1210,6 +1214,51 @@ export async function evaluateRecipePricing(
               product: p,
               source: p.source as typeof priceSources.$inferSelect | null,
             }));
+
+            if (traversal.relation === "derivative") {
+              const yieldRatio = traversal.derivative?.yieldRatio;
+              const reqBase = toBaseUnit(scaledQty, unitText);
+              const scaleRes = graphTraversal.scaleDerivativeQuantity(
+                reqBase.qty,
+                reqBase.unit,
+                yieldRatio,
+              );
+              effectiveQty = scaleRes.scaledQuantity;
+              effectiveUnit = reqBase.unit;
+
+              baseSupply.fulfillment = {
+                strategy: "derivative",
+                sourceIngredient:
+                  traversal.sourceIngredient?.name || traversal.ingredientName,
+                sourceIngredientId:
+                  traversal.sourceIngredient?.id || traversal.ingredientId,
+                process: traversal.derivative?.process,
+                yieldRatio: traversal.derivative?.yieldRatio,
+                lossRatio: traversal.derivative?.lossRatio,
+                adjustedQuantity: {
+                  value: scaleRes.scaledQuantity,
+                  unitText: reqBase.unit,
+                },
+                note: scaleRes.note,
+              };
+              baseSupply.note = scaleRes.note;
+            } else if (
+              traversal.relation === "parent" ||
+              traversal.relation === "substitute"
+            ) {
+              const fulfillmentNote = `Fulfilled via ${traversal.relation} ingredient ${
+                traversal.sourceIngredient?.name || traversal.ingredientName
+              }`;
+              baseSupply.fulfillment = {
+                strategy: traversal.relation,
+                sourceIngredient:
+                  traversal.sourceIngredient?.name || traversal.ingredientName,
+                sourceIngredientId:
+                  traversal.sourceIngredient?.id || traversal.ingredientId,
+                note: fulfillmentNote,
+              };
+              baseSupply.note = fulfillmentNote;
+            }
           }
         }
       } catch {
@@ -1345,24 +1394,16 @@ export async function evaluateRecipePricing(
           "fresh oregano leaves",
         ],
         "beef broth": [
-          "beef stock",
           "beef broth",
+          "beef stock",
           "beef bouillon",
-          "stock cube",
-          "seasoning cube",
-          "chicken cubes",
-          "chicken stock powder",
-          "stock powder",
+          "beef consomme",
         ],
         "beef stock": [
           "beef stock",
           "beef broth",
           "beef bouillon",
-          "stock cube",
-          "seasoning cube",
-          "chicken cubes",
-          "chicken stock powder",
-          "stock powder",
+          "beef consomme",
         ],
         "chicken broth": [
           "chicken stock",
@@ -1712,18 +1753,22 @@ export async function evaluateRecipePricing(
               note: scaleRes.note,
             };
             baseSupply.note = scaleRes.note;
-          } else if (traversal.relation === "parent") {
+          } else if (
+            traversal.relation === "parent" ||
+            traversal.relation === "substitute"
+          ) {
+            const fulfillmentNote = `Fulfilled via ${traversal.relation} ingredient ${
+              traversal.sourceIngredient?.name || traversal.ingredientName
+            }`;
             baseSupply.fulfillment = {
               strategy: traversal.relation,
               sourceIngredient:
                 traversal.sourceIngredient?.name || traversal.ingredientName,
               sourceIngredientId:
                 traversal.sourceIngredient?.id || traversal.ingredientId,
-              note: `Fulfilled via ${traversal.relation} ingredient ${
-                traversal.sourceIngredient?.name || traversal.ingredientName
-              }`,
+              note: fulfillmentNote,
             };
-            baseSupply.note = baseSupply.fulfillment.note;
+            baseSupply.note = fulfillmentNote;
           }
         }
       }
