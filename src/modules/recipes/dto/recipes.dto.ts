@@ -7,7 +7,14 @@ import {
 
 export const recipeOptionsSchema = z.object({
   strategy: z
-    .enum(["cheapest", "expensive", "cheapest_single_store"])
+    .enum([
+      "cheapest",
+      "cheapest_basket",
+      "cheapest_per_unit",
+      "cheapest_pro_rata",
+      "cheapest_single_store",
+      "expensive",
+    ])
     .optional()
     .default("cheapest"),
   servings: z.number().positive().optional(),

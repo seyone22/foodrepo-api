@@ -76,7 +76,8 @@ export class RecipesController {
     @Body(new ZodValidationPipe(recipePricingRequestSchema))
     recipe: RecipePricingRequest,
   ): Promise<SchemaOrgRecipe> {
-    return evaluateRecipePricing(recipe as SchemaOrgRecipe);
+    const { options, ...recipeData } = recipe as any;
+    return evaluateRecipePricing(recipeData as SchemaOrgRecipe, options);
   }
 
   @Post("parse-and-price")

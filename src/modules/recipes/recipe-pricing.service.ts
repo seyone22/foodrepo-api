@@ -2374,15 +2374,40 @@ export async function evaluateRecipePricing(
     > = {};
 
     for (const item of evaluations) {
-      if (item.isExcluded) continue;
+      if (item.isExcluded || item.offers.length === 0) continue;
+
+      // Group offers by store for this item, and pick ONLY the cheapest basket offer for each store
+      const storeBestForIngredient: Record<
+        string,
+        { basketCost: number; recipeCost: number; storeName: string }
+      > = {};
+
       for (const offer of item.offers) {
         const storeId = offer.seller?.identifier || "unknown";
         const storeName = offer.seller?.name || "Unknown Supermarket";
+        const bCost = offer.basketCost ?? offer.price;
+        const rCost = offer.recipeCost ?? offer.price;
+
+        const currentBest = storeBestForIngredient[storeId];
+        if (
+          !currentBest ||
+          bCost < currentBest.basketCost ||
+          (Math.abs(bCost - currentBest.basketCost) <= 0.01 && rCost < currentBest.recipeCost)
+        ) {
+          storeBestForIngredient[storeId] = {
+            basketCost: bCost,
+            recipeCost: rCost,
+            storeName,
+          };
+        }
+      }
+
+      for (const [storeId, info] of Object.entries(storeBestForIngredient)) {
         if (!storeCoverage[storeId]) {
-          storeCoverage[storeId] = { count: 0, basketTotal: 0, storeName };
+          storeCoverage[storeId] = { count: 0, basketTotal: 0, storeName: info.storeName };
         }
         storeCoverage[storeId].count += 1;
-        storeCoverage[storeId].basketTotal += offer.basketCost || offer.price;
+        storeCoverage[storeId].basketTotal += info.basketCost;
       }
     }
 
@@ -2417,25 +2442,42 @@ export async function evaluateRecipePricing(
       continue;
     }
 
-    // Sort candidate offers
+    // Sort candidate offers based on strategy
     if (strategy === "expensive") {
       item.offers.sort(
         (a, b) => (b.recipeCost ?? b.price) - (a.recipeCost ?? a.price),
       );
+    } else if (
+      strategy === "cheapest_per_unit" ||
+      strategy === "cheapest_pro_rata"
+    ) {
+      // Unit Value: Lowest pro-rata unit cost, tiebreak by lowest basket cost
+      item.offers.sort((a, b) => {
+        const costDiff = (a.recipeCost ?? a.price) - (b.recipeCost ?? b.price);
+        if (Math.abs(costDiff) > 0.01) return costDiff;
+        return (a.basketCost ?? a.price) - (b.basketCost ?? b.price);
+      });
     } else if (strategy === "cheapest_single_store" && winningSingleStore) {
-      // Prioritize offers from the winning single store
+      // Prioritize offers from the winning single store (sorted by lowest basket cost, tiebreak pro-rata)
       item.offers.sort((a, b) => {
         const aIsWinning = a.seller?.identifier === winningSingleStore;
         const bIsWinning = b.seller?.identifier === winningSingleStore;
         if (aIsWinning && !bIsWinning) return -1;
         if (!aIsWinning && bIsWinning) return 1;
+        const basketDiff =
+          (a.basketCost ?? a.price) - (b.basketCost ?? b.price);
+        if (Math.abs(basketDiff) > 0.01) return basketDiff;
         return (a.recipeCost ?? a.price) - (b.recipeCost ?? b.price);
       });
     } else {
-      // Default: cheapest per item
-      item.offers.sort(
-        (a, b) => (a.recipeCost ?? a.price) - (b.recipeCost ?? b.price),
-      );
+      // Default (cheapest / cheapest_basket): Minimum Basket Outlay (packPrice * packsNeeded)
+      // If two options have the same basket cost, tiebreak by lowest pro-rata cost
+      item.offers.sort((a, b) => {
+        const basketDiff =
+          (a.basketCost ?? a.price) - (b.basketCost ?? b.price);
+        if (Math.abs(basketDiff) > 0.01) return basketDiff;
+        return (a.recipeCost ?? a.price) - (b.recipeCost ?? b.price);
+      });
     }
 
     const primaryOffer = item.offers[0];

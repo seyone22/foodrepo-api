@@ -104,8 +104,11 @@ export interface SchemaOrgRecipe {
 
 export type PricingStrategy =
   | "cheapest"
-  | "expensive"
-  | "cheapest_single_store";
+  | "cheapest_basket"
+  | "cheapest_per_unit"
+  | "cheapest_pro_rata"
+  | "cheapest_single_store"
+  | "expensive";
 
 export interface RecipePricingOptions {
   strategy?: PricingStrategy;
@@ -135,6 +138,23 @@ export const howToSupplyInputSchema = z.object({
   requiredQuantity: quantitativeValueSchema.optional(),
 });
 
+export const recipePricingOptionsSchema = z.object({
+  strategy: z
+    .enum([
+      "cheapest",
+      "cheapest_basket",
+      "cheapest_per_unit",
+      "cheapest_pro_rata",
+      "cheapest_single_store",
+      "expensive",
+    ])
+    .optional()
+    .default("cheapest"),
+  servings: z.number().positive().optional(),
+  sources: z.array(z.string()).optional(),
+  exclude: z.array(z.string()).optional(),
+});
+
 export const recipePricingRequestSchema = z.object({
   "@context": z.string().optional().default("https://schema.org"),
   "@type": z.literal("Recipe"),
@@ -143,6 +163,7 @@ export const recipePricingRequestSchema = z.object({
   recipeIngredient: z
     .array(howToSupplyInputSchema)
     .min(1, "At least one recipeIngredient is required"),
+  options: recipePricingOptionsSchema.optional(),
 });
 
 export type RecipePricingRequestInput = z.infer<
