@@ -424,12 +424,18 @@ export class IngredientsService {
       categories: resolution.categories,
       resolvedFrom: resolution.sourceIngredient
         ? {
+            id: resolution.sourceIngredient.id,
             ingredient: resolution.sourceIngredient.name,
             relation: resolution.relation,
             level: resolution.level,
             derivative: resolution.derivative,
           }
-        : undefined,
+        : resolution.relation === "child"
+          ? {
+              relation: "child",
+              ingredient: ing.name,
+            }
+          : undefined,
     };
   }
 

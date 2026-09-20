@@ -491,6 +491,7 @@ export class GraphTraversalService {
               },
               density: resolvedDensity ?? subResolution.density,
               products: subResolution.products,
+              categories: subResolution.categories,
             };
           }
         }
