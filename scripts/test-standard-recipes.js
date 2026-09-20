@@ -430,9 +430,67 @@ async function runStandardTests() {
     `;
     assert(noMushroomInOyster.length === 0, 'Zero mushroom or sauce products mapped to shellfish oyster');
 
+    // 18. Recipe 15: Chinese Soy Sauce Chicken Checks
+    console.log('\n--- Checking Recipe: Chinese Soy Sauce Chicken ---');
+
+    // 18.1 Neutral cooking oil fidelity (zero lamp wicks, zero castor oil)
+    const badOilMappings = await sql`
+      SELECT p.name
+      FROM foodrepo.mappings m
+      JOIN foodrepo.products p ON p.id = m.product_id
+      JOIN foodrepo.ingredients i ON i.id = m.matched_ingredients[1]
+      WHERE i.name IN ('neutral oil', 'vegetable oil', 'sunflower oil', 'cooking oil')
+        AND (p.name ILIKE '%wick%' OR p.name ILIKE '%castor%' OR p.name ILIKE '%lamp%');
+    `;
+    assert(badOilMappings.length === 0, 'Zero lamp wicks or castor oil mapped to cooking oils');
+
+    // 18.2 Chicken bouillon/stock fidelity (zero spicy wings or raw chicken cuts)
+    const badBouillonMappings = await sql`
+      SELECT p.name
+      FROM foodrepo.mappings m
+      JOIN foodrepo.products p ON p.id = m.product_id
+      JOIN foodrepo.ingredients i ON i.id = m.matched_ingredients[1]
+      WHERE i.name IN ('chicken base', 'chicken bouillon', 'bouillon', 'stock cube')
+        AND (p.name ILIKE '%spicy wings%' OR p.name ILIKE '%drumstick%' OR p.name ILIKE '%curry cut%');
+    `;
+    assert(badBouillonMappings.length === 0, 'Zero chicken meat cuts mapped to chicken bouillon/stock cubes');
+
+    // 18.3 Whole chicken fidelity (zero coating mixes or flour mixes)
+    const badChickenMappings = await sql`
+      SELECT p.name
+      FROM foodrepo.mappings m
+      JOIN foodrepo.products p ON p.id = m.product_id
+      JOIN foodrepo.ingredients i ON i.id = m.matched_ingredients[1]
+      WHERE i.name = 'chicken'
+        AND (p.name ILIKE '%crispy fried chicken mix%' OR p.name ILIKE '%coating mix%');
+    `;
+    assert(badChickenMappings.length === 0, 'Zero coating or flour mixes mapped to raw whole chicken');
+
+    // 18.4 Chinese cooking wine fidelity (zero cabbage, zero biscuits, zero vinegar)
+    const badWineMappings = await sql`
+      SELECT p.name
+      FROM foodrepo.mappings m
+      JOIN foodrepo.products p ON p.id = m.product_id
+      JOIN foodrepo.ingredients i ON i.id = m.matched_ingredients[1]
+      WHERE i.name IN ('shaoxing wine', 'chinese rose wine', 'cooking wine')
+        AND (p.name ILIKE '%cabbage%' OR p.name ILIKE '%biscuit%' OR p.name ILIKE '%vinegar%');
+    `;
+    assert(badWineMappings.length === 0, 'Zero vegetables, biscuits, or vinegar mapped to cooking wine');
+
+    // 18.5 Water fidelity (zero ice corn confections or mattresses)
+    const badWaterMappings = await sql`
+      SELECT p.name
+      FROM foodrepo.mappings m
+      JOIN foodrepo.products p ON p.id = m.product_id
+      JOIN foodrepo.ingredients i ON i.id = m.matched_ingredients[1]
+      WHERE i.name = 'water'
+        AND (p.name ILIKE '%ice corn%' OR p.name ILIKE '%mattress%' OR p.name ILIKE '%heater%');
+    `;
+    assert(badWaterMappings.length === 0, 'Zero ice confections, mattresses, or heaters mapped to water');
+
     console.log(`\n========================================`);
     if (failureCount === 0) {
-      console.log(`ALL 14 STANDARDIZED RECIPE TESTS PASSED (0 failures)`);
+      console.log(`ALL 15 STANDARDIZED RECIPE TESTS PASSED (0 failures)`);
     } else {
       console.error(`STANDARDIZED RECIPE TESTS FAILED with ${failureCount} failure(s)! STOPPING.`);
     }

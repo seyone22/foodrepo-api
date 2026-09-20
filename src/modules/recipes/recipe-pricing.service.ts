@@ -467,6 +467,30 @@ export async function evaluateRecipePricing(
         };
       }
 
+      // Culinary tap water is an assumed household pantry staple at Rs. 0.00
+      const cleanSupplyName = supplyName.toLowerCase().trim();
+      const isCulinaryWater =
+        cleanSupplyName === "water" ||
+        cleanSupplyName === "tap water" ||
+        cleanSupplyName === "cold water" ||
+        cleanSupplyName === "hot water" ||
+        cleanSupplyName === "ice water" ||
+        cleanSupplyName === "warm water" ||
+        cleanSupplyName === "boiling water" ||
+        cleanSupplyName === "filtered water";
+
+      if (isCulinaryWater) {
+        baseSupply.status = "excluded";
+        baseSupply.note = "Assumed at home (Rs. 0.00)";
+        return {
+          supply: baseSupply,
+          offers: [],
+          requiredQty: scaledQty,
+          requiredUnit: unitText,
+          isExcluded: true,
+        };
+      }
+
     // -----------------------------------------------------------------------
     // Multi-Stage Ingredient & Supermarket Product Resolver
     // -----------------------------------------------------------------------
@@ -555,6 +579,12 @@ export async function evaluateRecipePricing(
         "hanging deco",
         "toy",
         "figurine",
+        "wick",
+        "wicks",
+        "lamp wick",
+        "oil lamp",
+        "camphor",
+        "agarbatti",
       ];
       for (const bad of nonFoodKeywords) {
         if (lower.includes(bad) && !clean.includes(bad)) return false;
@@ -574,7 +604,9 @@ export async function evaluateRecipePricing(
         clean.includes("broth") ||
         clean.includes("stock") ||
         clean.includes("bouillon") ||
-        clean.includes("consomme");
+        clean.includes("consomme") ||
+        clean.includes("chicken base") ||
+        clean.includes("beef base");
 
       // 1. Egg / Egg yolks (exclude prepared meals/bakery snacks/mayo)
       if (clean.includes("egg")) {
@@ -831,6 +863,50 @@ export async function evaluateRecipePricing(
         if (clean.includes("breast") && !lower.includes("breast")) {
           return false;
         }
+
+        // If recipe requests a unit of chicken or whole chicken, exclude cut pieces
+        const isWholeChickenReq =
+          clean === "chicken" ||
+          clean === "whole chicken" ||
+          clean.includes("whole chicken") ||
+          (clean.includes("chicken") &&
+            unitText === "unit" &&
+            !clean.includes("wing") &&
+            !clean.includes("drumstick") &&
+            !clean.includes("thigh") &&
+            !clean.includes("breast"));
+
+        if (isWholeChickenReq) {
+          const cutPartWords = [
+            "wing",
+            "wings",
+            "drumstick",
+            "drumsticks",
+            "thigh",
+            "thighs",
+            "breast",
+            "breasts",
+            "gizzard",
+            "liver",
+            "neck",
+            "curry cut",
+            "fillet",
+            "fillets",
+            "tenderloin",
+            "tenderloins",
+            "cube",
+            "cubes",
+            "smoke",
+            "smoked",
+          ];
+          if (
+            cutPartWords.some(
+              (w) => lower.includes(w) && !lower.includes("whole chicken"),
+            )
+          ) {
+            return false;
+          }
+        }
         const nonFreshChickenWords = [
           "sausage",
           "nugget",
@@ -845,6 +921,24 @@ export async function evaluateRecipePricing(
           "bun",
           "patty",
           "roll",
+          "mix",
+          "coating",
+          "crispy fried",
+          "powder",
+          "flour",
+          "paste",
+          "batter",
+          "marinade",
+          "soup cube",
+          "crumb",
+          "crumbs",
+          "popcorn",
+          "slice",
+          "slices",
+          "strips",
+          "deli",
+          "smoke",
+          "smoked",
         ];
         if (nonFreshChickenWords.some((w) => lower.includes(w))) return false;
       }
@@ -1005,12 +1099,14 @@ export async function evaluateRecipePricing(
         }
       }
 
-      // 17. Broth / Stock / Bouillon Fidelity
+      // 17. Broth / Stock / Bouillon / Base Fidelity
       if (
         clean.includes("broth") ||
         clean.includes("stock") ||
         clean.includes("bouillon") ||
-        clean.includes("consomme")
+        clean.includes("consomme") ||
+        clean.includes("chicken base") ||
+        clean.includes("beef base")
       ) {
         const nonBrothWords = [
           "sausage",
@@ -1039,6 +1135,23 @@ export async function evaluateRecipePricing(
           "shampoo",
           "bites",
           "cracker",
+          "wing",
+          "wings",
+          "drumstick",
+          "drumsticks",
+          "thigh",
+          "thighs",
+          "breast",
+          "breasts",
+          "curry cut",
+          "whole chicken",
+          "gizzard",
+          "liver",
+          "neck",
+          "spicy wings",
+          "hot drumlets",
+          "crispy fried",
+          "fryer",
         ];
         if (
           nonBrothWords.some(
@@ -1056,34 +1169,21 @@ export async function evaluateRecipePricing(
           return false;
         }
 
-        // If product mentions fresh meat or poultry, it MUST be an actual broth/stock preparation (stock powder, cube, essence)
-        const meatWords = [
-          "chicken",
-          "beef",
-          "pork",
-          "mutton",
-          "lamb",
-          "duck",
-          "turkey",
-          "meat",
-          "poultry",
+        // Any matched product MUST contain a genuine broth/stock indicator
+        const brothIndicators = [
+          "stock",
+          "broth",
+          "bouillon",
+          "cube",
+          "cubes",
+          "powder",
+          "seasoning",
+          "extract",
+          "essence",
+          "soup",
         ];
-        if (meatWords.some((w) => lower.includes(w))) {
-          const brothIndicators = [
-            "stock",
-            "broth",
-            "bouillon",
-            "cube",
-            "cubes",
-            "powder",
-            "seasoning",
-            "extract",
-            "essence",
-            "soup",
-          ];
-          if (!brothIndicators.some((w) => lower.includes(w))) {
-            return false;
-          }
+        if (!brothIndicators.some((w) => lower.includes(w))) {
+          return false;
         }
       }
 
@@ -1765,6 +1865,174 @@ export async function evaluateRecipePricing(
         }
       }
 
+      // 32. Cooking Wine / Wine Fidelity (Shaoxing wine, Chinese rose wine, Mirin, Sake, Cooking wine)
+      const isWineReq =
+        clean.includes("wine") ||
+        clean.includes("shaoxing") ||
+        clean.includes("mirin") ||
+        clean.includes("sake");
+      if (isWineReq) {
+        const nonWineWords = [
+          "cabbage",
+          "produce",
+          "vegetable",
+          "veg",
+          "leek",
+          "leeks",
+          "biscuit",
+          "biscuits",
+          "cookie",
+          "cookies",
+          "cracker",
+          "crackers",
+          "cake",
+          "cakes",
+          "bag",
+          "printed",
+          "tea",
+          "cup",
+          "glass",
+          "dispenser",
+          "vinegar",
+          "twine",
+          "thread",
+          "face wash",
+          "facewash",
+        ];
+        if (nonWineWords.some((w) => lower.includes(w) && !clean.includes(w))) {
+          return false;
+        }
+
+        if (
+          catPath?.some((c) =>
+            /vegetable|fruit|produce|bakery|snack|biscuit|personal|beauty|household/i.test(c),
+          )
+        ) {
+          return false;
+        }
+
+        if (
+          !lower.includes("wine") &&
+          !lower.includes("mirin") &&
+          !lower.includes("sake")
+        ) {
+          return false;
+        }
+
+        const isChineseOrCookingWine =
+          clean.includes("shaoxing") ||
+          clean.includes("chinese") ||
+          clean.includes("rose wine") ||
+          clean.includes("cooking wine") ||
+          clean.includes("rice wine");
+
+        if (isChineseOrCookingWine) {
+          const cookingWineIndicators = [
+            "cooking wine",
+            "rice wine",
+            "shaoxing",
+            "mirin",
+            "sake",
+            "chinese wine",
+            "rose wine",
+          ];
+          if (!cookingWineIndicators.some((w) => lower.includes(w))) {
+            return false;
+          }
+        }
+      }
+
+      // 33. Cooking Oil Fidelity (Neutral oil, vegetable oil, sunflower oil, canola oil, cooking oil)
+      if (
+        clean.includes("oil") &&
+        !clean.includes("boil") &&
+        !clean.includes("foil")
+      ) {
+        const nonCookingOilWords = [
+          "wick",
+          "wicks",
+          "lamp",
+          "hair",
+          "massage",
+          "engine",
+          "motor",
+          "baby oil",
+          "essential oil",
+          "citronella",
+          "diffuser",
+          "burner",
+          "pooja",
+          "puja",
+          "castor",
+          "siddhalepa",
+          "ayurvedic",
+          "medicated",
+          "medicinal",
+          "herbal oil",
+          "mackerel",
+          "tuna",
+          "sardine",
+          "sardines",
+          "fish",
+          "salmon",
+          "jack mackerel",
+        ];
+        if (nonCookingOilWords.some((w) => lower.includes(w))) {
+          return false;
+        }
+
+        // If neutral oil requested, reject non-neutral flavored oils and require neutral oil indicators
+        if (clean.includes("neutral")) {
+          const nonNeutralOilWords = [
+            "olive",
+            "coconut",
+            "cocnut",
+            "sesame",
+            "mustard",
+            "gingelly",
+            "tillie",
+            "n-joy",
+          ];
+          if (nonNeutralOilWords.some((w) => lower.includes(w))) {
+            return false;
+          }
+
+          const neutralOilIndicators = [
+            "vegetable oil",
+            "sunflower",
+            "canola",
+            "corn oil",
+            "soya",
+            "soybean",
+            "palm olein",
+            "cooking oil",
+          ];
+          if (!neutralOilIndicators.some((w) => lower.includes(w))) {
+            return false;
+          }
+        }
+      }
+
+      // 34. Water (exclude ice cream, frozen ice confections, dispensers, mattresses)
+      if (clean === "water" || clean.includes("water")) {
+        const nonWaterWords = [
+          "ice corn",
+          "ice cream",
+          "i/c",
+          "confection",
+          "lollipop",
+          "mattress",
+          "heater",
+          "lily",
+          "bottle",
+          "dispenser",
+          "filter",
+        ];
+        if (nonWaterWords.some((w) => lower.includes(w))) {
+          return false;
+        }
+      }
+
       return true;
     };
 
@@ -2301,6 +2569,75 @@ export async function evaluateRecipePricing(
           "uht milk",
           "milk",
         ],
+        "neutral oil": [
+          "vegetable oil",
+          "sunflower oil",
+          "canola oil",
+          "corn oil",
+          "cooking oil",
+        ],
+        "neutral vegetable oil": [
+          "vegetable oil",
+          "sunflower oil",
+          "canola oil",
+          "corn oil",
+          "cooking oil",
+        ],
+        "cooking oil": [
+          "vegetable oil",
+          "sunflower oil",
+          "canola oil",
+          "corn oil",
+        ],
+        "chicken base": [
+          "chicken stock",
+          "chicken broth",
+          "chicken cubes",
+          "chicken stock powder",
+          "stock cube",
+          "seasoning cube",
+        ],
+        "chicken base or bouillon": [
+          "chicken stock",
+          "chicken broth",
+          "chicken cubes",
+          "chicken stock powder",
+          "stock cube",
+          "seasoning cube",
+        ],
+        "chicken bouillon": [
+          "chicken stock",
+          "chicken broth",
+          "chicken cubes",
+          "chicken stock powder",
+          "stock cube",
+          "seasoning cube",
+        ],
+        chicken: [
+          "whole chicken",
+          "broiler chicken",
+          "curry chicken",
+          "skinless chicken",
+          "pre cut chicken",
+        ],
+        "whole chicken": [
+          "whole chicken",
+          "broiler chicken",
+          "curry chicken",
+          "skinless chicken",
+          "pre cut chicken",
+        ],
+        "chinese rose wine": [
+          "cooking wine",
+          "rice wine",
+          "shaoxing wine",
+        ],
+        "shaoxing wine": [
+          "shaoxing rice wine",
+          "cooking wine",
+          "chinese cooking wine",
+          "rice wine",
+        ],
       };
 
       const GENERIC_FOOD_NOUNS = new Set([
@@ -2345,6 +2682,11 @@ export async function evaluateRecipePricing(
               "optional",
             ].includes(w),
         );
+      const isWineOrAlcohol =
+        clean.includes("wine") ||
+        clean.includes("shaoxing") ||
+        clean.includes("mirin") ||
+        clean.includes("sake");
       const candidates = [
         clean,
         ...(SYNONYMS[clean] || []),
@@ -2354,12 +2696,12 @@ export async function evaluateRecipePricing(
         ...(clean.endsWith("es") && clean.length > 4
           ? [clean.slice(0, -2)]
           : []),
-        ...(words.length > 1
+        ...(!isWineOrAlcohol && words.length > 1
           ? [words.slice(1).join(" "), words.join(" ")].filter(
               (w) => !GENERIC_FOOD_NOUNS.has(w),
             )
           : []),
-        ...(!GENERIC_FOOD_NOUNS.has(words[words.length - 1])
+        ...(!isWineOrAlcohol && !GENERIC_FOOD_NOUNS.has(words[words.length - 1])
           ? [words[words.length - 1]]
           : []),
       ];
