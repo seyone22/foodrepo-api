@@ -430,6 +430,13 @@ export async function evaluateRecipePricing(
         "liquid detergent",
         "detergent liquid",
         "liquid soap",
+        "body butter",
+        "body milk",
+        "lip therapy",
+        "lip balm",
+        "butter knife",
+        "cutlery",
+        "utensil",
       ];
       for (const bad of nonFoodKeywords) {
         if (lower.includes(bad) && !clean.includes(bad)) return false;
@@ -1357,6 +1364,99 @@ export async function evaluateRecipePricing(
         }
       }
 
+      // 26. Butter / Dairy Fat Fidelity
+      const isButterReq =
+        clean === "butter" ||
+        clean.includes("salted butter") ||
+        clean.includes("unsalted butter") ||
+        clean.includes("table butter") ||
+        clean.includes("cooking butter") ||
+        clean.includes("dairy butter") ||
+        clean.includes("sweet cream butter");
+
+      if (isButterReq) {
+        const nonButterKeywords = [
+          "biscuit",
+          "biscuits",
+          "cookie",
+          "cookies",
+          "cake",
+          "cakes",
+          "sponge cake",
+          "layer cake",
+          "bun",
+          "buns",
+          "croissant",
+          "pastry",
+          "cracker",
+          "crackers",
+          "rusk",
+          "rusks",
+          "popcorn",
+          "pudding",
+          "puddings",
+          "toffee",
+          "toffees",
+          "candy",
+          "candies",
+          "choxy",
+          "snack",
+          "snacks",
+          "murukku",
+          "curry",
+          "masala",
+          "butter chicken",
+          "paneer butter",
+          "butter beans",
+          "butterhead",
+          "butter head",
+          "lettuce",
+          "bread",
+          "naan",
+          "roti",
+          "ice cream",
+          "milkshake",
+          "essence",
+          "sprinkles",
+          "peanut",
+          "almond",
+          "cashew",
+          "soynut",
+          "sunflower",
+          "coconut butter",
+          "body butter",
+          "body lotion",
+          "body wash",
+          "body milk",
+          "lip care",
+          "lip balm",
+          "lip therapy",
+          "knife",
+          "shortbread",
+          "b/butter",
+        ];
+        if (
+          nonButterKeywords.some(
+            (w) => lower.includes(w) && !clean.includes(w),
+          )
+        ) {
+          return false;
+        }
+
+        const butterIndicators = [
+          "butter",
+          "salted butter",
+          "unsalted butter",
+          "table butter",
+          "cooking butter",
+          "portion butter",
+          "ghee",
+        ];
+        if (!butterIndicators.some((w) => lower.includes(w))) {
+          return false;
+        }
+      }
+
       return true;
     };
 
@@ -1836,6 +1936,18 @@ export async function evaluateRecipePricing(
           "baking soda",
           "sodium bicarbonate",
           "bicarb soda",
+        ],
+        butter: [
+          "salted butter",
+          "unsalted butter",
+          "table butter",
+        ],
+        "salted butter": [
+          "butter",
+          "table butter",
+        ],
+        "unsalted butter": [
+          "butter",
         ],
       };
 
