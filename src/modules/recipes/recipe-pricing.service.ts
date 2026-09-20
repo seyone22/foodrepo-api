@@ -132,6 +132,14 @@ const AVERAGE_PIECE_WEIGHT_GRAMS: Record<string, number> = {
   onions: 150,
   "red onion": 100,
   "big onion": 150,
+  "green onion": 15,
+  "green onions": 15,
+  scallion: 15,
+  scallions: 15,
+  "spring onion": 15,
+  "spring onions": 15,
+  "onion leaf": 15,
+  "onion leaves": 15,
   potato: 170,
   potatoes: 170,
   tomato: 120,
@@ -786,20 +794,99 @@ export async function evaluateRecipePricing(
         }
       }
 
-      // 17. Broth / Stock: require savory stock, soup, or bouillon, never household chemicals
-      if (clean.includes("broth") || clean.includes("stock")) {
-        const nonBrothWords = ["dettol", "soap", "cleaner", "shampoo"];
-        if (nonBrothWords.some((w) => lower.includes(w))) return false;
+      // 17. Broth / Stock / Bouillon Fidelity
+      if (
+        clean.includes("broth") ||
+        clean.includes("stock") ||
+        clean.includes("bouillon") ||
+        clean.includes("consomme")
+      ) {
+        const nonBrothWords = [
+          "sausage",
+          "sausages",
+          "patty",
+          "patties",
+          "meatball",
+          "meatballs",
+          "steak",
+          "steaks",
+          "roast",
+          "bacon",
+          "ham",
+          "mince",
+          "ground",
+          "smoke",
+          "smoked",
+          "nugget",
+          "nuggets",
+          "curry",
+          "roll",
+          "bun",
+          "dettol",
+          "soap",
+          "cleaner",
+          "shampoo",
+          "bites",
+          "cracker",
+        ];
+        if (
+          nonBrothWords.some(
+            (w) => lower.includes(w) && !clean.includes(w),
+          )
+        ) {
+          return false;
+        }
+
+        // If product mentions fresh meat or poultry, it MUST be an actual broth/stock preparation (stock powder, cube, soup bone, essence)
+        const meatWords = [
+          "chicken",
+          "beef",
+          "pork",
+          "mutton",
+          "lamb",
+          "duck",
+          "turkey",
+          "meat",
+          "poultry",
+        ];
+        if (meatWords.some((w) => lower.includes(w))) {
+          const brothIndicators = [
+            "stock",
+            "broth",
+            "bouillon",
+            "cube",
+            "cubes",
+            "powder",
+            "seasoning",
+            "soup bone",
+            "soup bones",
+            "bones",
+            "bone",
+            "extract",
+            "essence",
+            "soup",
+          ];
+          if (!brothIndicators.some((w) => lower.includes(w))) {
+            return false;
+          }
+        }
       }
 
       // 18. Red Meat (beef, pork, mutton, lamb) & Ground/Minced Meat Fidelity
+      const isBrothOrStock =
+        clean.includes("broth") ||
+        clean.includes("stock") ||
+        clean.includes("bouillon") ||
+        clean.includes("consomme");
+
       if (
-        clean.includes("beef") ||
-        clean.includes("pork") ||
-        clean.includes("mutton") ||
-        clean.includes("lamb") ||
-        clean.includes("ground meat") ||
-        clean.includes("mince")
+        !isBrothOrStock &&
+        (clean.includes("beef") ||
+          clean.includes("pork") ||
+          clean.includes("mutton") ||
+          clean.includes("lamb") ||
+          clean.includes("ground meat") ||
+          clean.includes("mince"))
       ) {
         // If specifically asking for ground / minced meat, product MUST be minced/ground meat
         if (clean.includes("ground") || clean.includes("mince")) {
@@ -914,6 +1001,61 @@ export async function evaluateRecipePricing(
         }
       }
 
+      // 20. Green Onions / Scallions / Spring Onions Fidelity
+      const isGreenOnionReq =
+        clean.includes("green onion") ||
+        clean.includes("scallion") ||
+        clean.includes("spring onion") ||
+        clean.includes("onion leaf") ||
+        clean.includes("onion leaves");
+
+      if (isGreenOnionReq) {
+        // Exclude bulb onions: big onion, red onion, bombay onion, shallots, or plain bulb onions
+        const bulbOnionWords = [
+          "big onion",
+          "bombay onion",
+          "red onion",
+          "b/onion",
+          "r/onion",
+          "shallot",
+          "pink onion",
+          "white onion",
+          "yellow onion",
+          "brown onion",
+        ];
+        if (bulbOnionWords.some((w) => lower.includes(w))) return false;
+
+        // Must have green/spring/scallion/leaf/leek identifier if it mentions onion
+        const hasGreenIdentifier =
+          lower.includes("green") ||
+          lower.includes("spring") ||
+          lower.includes("leaf") ||
+          lower.includes("leaves") ||
+          lower.includes("scallion") ||
+          lower.includes("leek");
+        if (!hasGreenIdentifier) {
+          return false;
+        }
+
+        // Exclude snacks/processed/bakery
+        const nonProduceWords = [
+          "tipi tip",
+          "chips",
+          "cracker",
+          "bites",
+          "murukku",
+          "popcorn",
+          "shampoo",
+          "paratha",
+          "pastry",
+          "sauce",
+          "paste",
+          "biscuit",
+          "snack",
+        ];
+        if (nonProduceWords.some((w) => lower.includes(w))) return false;
+      }
+
       return true;
     };
 
@@ -993,6 +1135,108 @@ export async function evaluateRecipePricing(
         milk: ["fresh milk", "uht milk", "full cream milk", "milk"],
         garlic: ["garlic 1kg", "garlic", "fresh garlic"],
         onion: ["big onion", "red onion", "onion"],
+        "green onion": [
+          "spring onion",
+          "onion leaves",
+          "scallion",
+          "green onion",
+          "leeks",
+        ],
+        "green onions": [
+          "spring onion",
+          "onion leaves",
+          "scallion",
+          "green onion",
+          "leeks",
+        ],
+        scallion: [
+          "spring onion",
+          "onion leaves",
+          "scallion",
+          "green onion",
+          "leeks",
+        ],
+        scallions: [
+          "spring onion",
+          "onion leaves",
+          "scallion",
+          "green onion",
+          "leeks",
+        ],
+        "spring onion": [
+          "spring onion",
+          "onion leaves",
+          "scallion",
+          "green onion",
+          "leeks",
+        ],
+        "spring onions": [
+          "spring onion",
+          "onion leaves",
+          "scallion",
+          "green onion",
+          "leeks",
+        ],
+        "onion leaves": [
+          "onion leaves",
+          "spring onion",
+          "green onion",
+          "scallion",
+        ],
+        "beef broth": [
+          "beef stock",
+          "beef broth",
+          "beef bouillon",
+          "stock cube",
+          "seasoning cube",
+          "chicken cubes",
+          "chicken stock powder",
+          "stock powder",
+        ],
+        "beef stock": [
+          "beef stock",
+          "beef broth",
+          "beef bouillon",
+          "stock cube",
+          "seasoning cube",
+          "chicken cubes",
+          "chicken stock powder",
+          "stock powder",
+        ],
+        "chicken broth": [
+          "chicken stock",
+          "chicken broth",
+          "stock cube",
+          "seasoning cube",
+          "chicken cubes",
+          "chicken stock powder",
+          "stock powder",
+        ],
+        "chicken stock": [
+          "chicken stock",
+          "chicken broth",
+          "stock cube",
+          "seasoning cube",
+          "chicken cubes",
+          "chicken stock powder",
+          "stock powder",
+        ],
+        broth: [
+          "stock cube",
+          "seasoning cube",
+          "stock powder",
+          "chicken cubes",
+          "broth",
+          "stock",
+        ],
+        stock: [
+          "stock cube",
+          "seasoning cube",
+          "stock powder",
+          "chicken cubes",
+          "stock",
+          "broth",
+        ],
         tomatoes: ["tomatoes", "tomato", "tomato (kg)"],
         "chicken breast": [
           "chicken breast",
@@ -1059,12 +1303,6 @@ export async function evaluateRecipePricing(
           "tomato puree",
           "tomato paste",
           "canned tomatoes",
-        ],
-        "beef broth": [
-          "beef stock",
-          "beef broth",
-          "beef bouillon",
-          "stock cube",
         ],
         "cayenne pepper": [
           "cayenne pepper",
@@ -1459,7 +1697,7 @@ export async function evaluateRecipePricing(
       ) {
         // Continuous volume <-> mass conversion via culinary density
         const density = traversal?.density ?? getCulinaryDensity(supplyName);
-        const reqGrams =
+        let reqGrams =
           ingredientReqBase.unit === "ml"
             ? ingredientReqBase.qty * density
             : ingredientReqBase.qty;
@@ -1467,6 +1705,21 @@ export async function evaluateRecipePricing(
           productPkgBase.unit === "ml"
             ? productPkgBase.qty * density
             : productPkgBase.qty;
+
+        // Reconstitution for concentrated stock cubes and powders:
+        // 1 cup (240ml) liquid broth = ~1 stock cube (10g) or ~5g powder
+        const isBrothReq =
+          supplyName.toLowerCase().includes("broth") ||
+          supplyName.toLowerCase().includes("stock") ||
+          supplyName.toLowerCase().includes("bouillon");
+        const isDryConcentrate =
+          product.name.toLowerCase().includes("cube") ||
+          product.name.toLowerCase().includes("powder") ||
+          product.name.toLowerCase().includes("seasoning");
+
+        if (isBrothReq && isDryConcentrate && ingredientReqBase.unit === "ml") {
+          reqGrams = (ingredientReqBase.qty / 240) * 10;
+        }
 
         if (pkgGrams > 0) {
           packsNeeded = Math.max(1, Math.ceil(reqGrams / pkgGrams));
