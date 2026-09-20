@@ -222,6 +222,17 @@ const CULINARY_DENSITY_G_PER_ML: Record<string, number> = {
   butter: 0.96,
   "shredded cheese": 0.47,
   "grated cheese": 0.45,
+  "dried oregano": 0.30,
+  "fresh oregano": 0.20,
+  oregano: 0.30,
+  "dried thyme": 0.28,
+  "fresh thyme": 0.25,
+  "dried rosemary": 0.32,
+  "fresh rosemary": 0.30,
+  "dried basil": 0.28,
+  "fresh basil": 0.20,
+  "dried parsley": 0.16,
+  "fresh parsley": 0.20,
 };
 
 function getCulinaryDensity(ingredientName: string): number {
@@ -1107,6 +1118,69 @@ export async function evaluateRecipePricing(
         }
       }
 
+      // 22. Fresh Herbs vs Dried Herbs Fidelity
+      const herbNames = [
+        "oregano",
+        "thyme",
+        "rosemary",
+        "basil",
+        "parsley",
+        "dill",
+        "mint",
+        "sage",
+        "coriander",
+        "cilantro",
+        "tarragon",
+        "marjoram",
+      ];
+      const matchedHerb = herbNames.find((h) => clean.includes(h));
+      if (matchedHerb) {
+        const isDriedRequest =
+          clean.includes("dried") ||
+          clean.includes("dry") ||
+          clean.includes("flake") ||
+          clean.includes("powder");
+        const isFreshRequest =
+          clean.includes("fresh") ||
+          clean.includes("sprig") ||
+          clean.includes("bunch");
+
+        if (isDriedRequest) {
+          // If recipe explicitly asks for dried herb, reject fresh produce / chilled fresh leafy herbs
+          if (
+            lower.includes("fresh") ||
+            lower.includes("jagro") ||
+            lower.includes("lassana") ||
+            lower.includes("hydroponic") ||
+            catPath?.some((c) => /fruit|vegetable|produce/i.test(c))
+          ) {
+            return false;
+          }
+        }
+
+        if (isFreshRequest) {
+          // If recipe explicitly asks for fresh herb, reject dried spices / jars / flakes
+          if (
+            lower.includes("dried") ||
+            lower.includes("dry") ||
+            lower.includes("flake") ||
+            lower.includes("flakes") ||
+            lower.includes("powder") ||
+            lower.includes("bayara") ||
+            lower.includes("finch") ||
+            lower.includes("orient") ||
+            lower.includes("navin") ||
+            lower.includes("mccormick") ||
+            lower.includes("masterfoods") ||
+            catPath?.some((c) =>
+              /grocery|groceries|spice|cooking essentials/i.test(c),
+            )
+          ) {
+            return false;
+          }
+        }
+      }
+
       return true;
     };
 
@@ -1259,6 +1333,16 @@ export async function evaluateRecipePricing(
           "mozzarella cheese",
           "pizza cheese",
           "shredded cheese",
+        ],
+        "dried oregano": [
+          "dried oregano",
+          "oregano flakes",
+          "oregano leaves",
+        ],
+        "fresh oregano": [
+          "fresh oregano",
+          "oregano sprigs",
+          "fresh oregano leaves",
         ],
         "beef broth": [
           "beef stock",
