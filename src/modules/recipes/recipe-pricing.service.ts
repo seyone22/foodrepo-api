@@ -411,6 +411,12 @@ export async function evaluateRecipePricing(
       }
 
       // Ingredient-specific context filtering:
+      const isBrothOrStock =
+        clean.includes("broth") ||
+        clean.includes("stock") ||
+        clean.includes("bouillon") ||
+        clean.includes("consomme");
+
       // 1. Egg / Egg yolks (exclude prepared meals/bakery snacks/mayo)
       if (clean.includes("egg")) {
         const nonRawEggWords = [
@@ -619,7 +625,7 @@ export async function evaluateRecipePricing(
       }
 
       // 8. Chicken Meat (exclude eggs, hatchery, sausages, nuggets)
-      if (clean.includes("chicken")) {
+      if (clean.includes("chicken") && !isBrothOrStock) {
         if (!clean.includes("egg")) {
           if (lower.includes("egg") || catPath?.some((c) => /egg/i.test(c))) {
             return false;
@@ -877,12 +883,6 @@ export async function evaluateRecipePricing(
       }
 
       // 18. Red Meat (beef, pork, mutton, lamb) & Ground/Minced Meat Fidelity
-      const isBrothOrStock =
-        clean.includes("broth") ||
-        clean.includes("stock") ||
-        clean.includes("bouillon") ||
-        clean.includes("consomme");
-
       if (
         !isBrothOrStock &&
         (clean.includes("beef") ||
