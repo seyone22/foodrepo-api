@@ -165,6 +165,18 @@ const AVERAGE_PIECE_WEIGHT_GRAMS: Record<string, number> = {
   bellpepper: 160,
   "bell pepper": 160,
   capsicum: 160,
+  tortilla: 50,
+  tortillas: 50,
+  "tortilla wrap": 50,
+  "tortilla wraps": 50,
+  "flour tortilla": 50,
+  "corn tortilla": 40,
+  "tortilla chip": 50,
+  "tortilla chips": 50,
+  "nacho chip": 50,
+  "nacho chips": 50,
+  "corn chip": 50,
+  "corn chips": 50,
 };
 
 function getProducePieceWeightGrams(ingredientName: string): number | null {
@@ -233,6 +245,11 @@ const CULINARY_DENSITY_G_PER_ML: Record<string, number> = {
   "fresh basil": 0.20,
   "dried parsley": 0.16,
   "fresh parsley": 0.20,
+  "tortilla chips": 0.20,
+  "tortilla chip": 0.20,
+  "nacho chips": 0.20,
+  "corn chips": 0.25,
+  tortilla: 0.50,
 };
 
 function getCulinaryDensity(ingredientName: string): number {
@@ -1185,6 +1202,91 @@ export async function evaluateRecipePricing(
         }
       }
 
+      // 23. Tortilla Chips / Nacho Chips / Corn Chips Fidelity
+      const isTortillaChipReq =
+        clean.includes("tortilla chip") ||
+        clean.includes("tortilla chips") ||
+        clean.includes("nacho") ||
+        clean.includes("nachos") ||
+        clean.includes("corn chip") ||
+        clean.includes("corn chips") ||
+        clean.includes("dorito") ||
+        clean.includes("tostito");
+
+      if (isTortillaChipReq) {
+        const hasTortillaChipIndicator =
+          lower.includes("tortilla") ||
+          lower.includes("nacho") ||
+          lower.includes("dorito") ||
+          lower.includes("tostito") ||
+          lower.includes("corn chip") ||
+          lower.includes("corn chips") ||
+          lower.includes("taco") ||
+          lower.includes("maxicorn");
+
+        if (!hasTortillaChipIndicator) {
+          return false;
+        }
+
+        const nonTortillaChipWords = [
+          "potato",
+          "cassava",
+          "manioc",
+          "tapioca",
+          "banana",
+          "plantain",
+          "chocolate",
+          "choco",
+          "ice cream",
+          "chirpy",
+          "tipi",
+          "bites",
+          "murukku",
+          "biscuit",
+          "cracker",
+          "popcorn",
+          "soup",
+          "dip",
+          "mix",
+        ];
+        if (
+          nonTortillaChipWords.some(
+            (w) => lower.includes(w) && !clean.includes(w),
+          )
+        ) {
+          return false;
+        }
+      }
+
+      // 24. Tortilla Flatbread / Wrap Fidelity
+      const isTortillaReq =
+        (clean.includes("tortilla") && !clean.includes("chip")) ||
+        clean.includes("tortillas") ||
+        clean.includes("wrap") ||
+        clean.includes("wraps");
+
+      if (isTortillaReq) {
+        // Exclude non-food packaging and wrapping materials
+        const nonFoodWrapWords = [
+          "cling wrap",
+          "cling",
+          "wrapping paper",
+          "wrapping sheet",
+          "wrapping",
+          "paper",
+          "sheet",
+          "sheets",
+          "foil",
+          "aluminium",
+          "plastic",
+          "laser",
+          "assorted 2",
+        ];
+        if (nonFoodWrapWords.some((w) => lower.includes(w))) {
+          return false;
+        }
+      }
+
       return true;
     };
 
@@ -1608,6 +1710,48 @@ export async function evaluateRecipePricing(
           "ground chicken",
           "minced chicken",
           "chicken mince",
+        ],
+        "tortilla chips": [
+          "nacho chips",
+          "corn chips",
+          "doritos",
+          "tortilla",
+        ],
+        "tortilla chip": [
+          "nacho chips",
+          "corn chips",
+          "doritos",
+          "tortilla",
+        ],
+        tortilla: [
+          "tortilla wrap",
+          "flour tortilla",
+          "corn tortilla",
+          "wraps",
+        ],
+        tortillas: [
+          "tortilla wrap",
+          "flour tortilla",
+          "corn tortilla",
+          "wraps",
+        ],
+        "nacho chips": [
+          "tortilla chips",
+          "corn chips",
+          "doritos",
+        ],
+        "nacho chip": [
+          "tortilla chips",
+          "corn chips",
+          "doritos",
+        ],
+        "corn chips": [
+          "tortilla chips",
+          "nacho chips",
+        ],
+        "corn chip": [
+          "tortilla chips",
+          "nacho chips",
         ],
       };
 
