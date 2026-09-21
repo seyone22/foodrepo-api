@@ -1,0 +1,9 @@
+{
+  "$schema": "https://schema.railpack.com",
+  "build": {
+    "aptPackages": ["...", "curl", "chromium"]
+  },
+  "deploy": {
+    "aptPackages": ["...", "curl", "chromium"]
+  }
+}
