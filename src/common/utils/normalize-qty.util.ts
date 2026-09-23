@@ -112,6 +112,39 @@ export function normalizeQuantityUnit(raw: any): NormalizedQtyUnit {
     return { quantity, unit };
   }
 
+  // Handle reverse multi-packs in title, e.g., "6G*25S", "2g*20 tea bags", "100g x 4"
+  const reverseMultiPackMatch = name.match(
+    /(\d+(?:\.\d+)?)\s*(g|kg|ml|l)\s*[xX*]\s*(\d+)(?:\s*(?:'s|s|pcs?|pkts?|bags?|sachets?))?\b/i,
+  );
+  if (reverseMultiPackMatch) {
+    const packQty = parseFloat(reverseMultiPackMatch[1]);
+    const packUnit = reverseMultiPackMatch[2].toLowerCase();
+    const packCount = parseFloat(reverseMultiPackMatch[3]);
+
+    switch (packUnit) {
+      case "g":
+        quantity = packCount * packQty;
+        unit = "g";
+        break;
+      case "kg":
+        quantity = packCount * packQty * 1000;
+        unit = "g";
+        break;
+      case "ml":
+        quantity = packCount * packQty;
+        unit = "ml";
+        break;
+      case "l":
+        quantity = packCount * packQty * 1000;
+        unit = "ml";
+        break;
+      default:
+        quantity = packCount * packQty;
+        unit = packUnit;
+    }
+    return { quantity, unit };
+  }
+
   // Handle simple explicit quantity in name, e.g., "400g", "1kg", "500ml"
   const qtyMatch = name.match(
     /(\d+(?:\.\d+)?)\s*(g|kg|ml|l|ltrs?|pack|pcs|piece|bottle|bag)/i,
