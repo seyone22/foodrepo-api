@@ -16,6 +16,29 @@ import {
   consumeAuthorizationCode,
   createAuthorizationCode,
 } from "./oauth.store";
+import {
+  filterReadOnlyScopes,
+  READ_ONLY_MCP_SCOPES,
+  signMcpToken,
+} from "./mcp-auth.util";
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function isSafeRedirectUri(uri: string): boolean {
+  try {
+    const parsed = new URL(uri);
+    return parsed.protocol === "https:" || parsed.protocol === "http:";
+  } catch {
+    return false;
+  }
+}
 
 @ApiTags("OAuth")
 @Controller("oauth")
@@ -26,36 +49,23 @@ export class OAuthController {
     @Query() query: any,
     @Res() res: Response,
   ) {
-    const clientId = query.client_id || "gemini-spark";
-    const redirectUri = query.redirect_uri;
-    const state = query.state || "";
-    const scopeStr =
-      query.scope || "read:ingredients write:ingredients read:products";
-    const codeChallenge = query.code_challenge || undefined;
-    const codeChallengeMethod = query.code_challenge_method || undefined;
-    const autoApprove = query.auto_approve === "true";
+    const clientId = String(query.client_id || "gemini-spark");
+    const redirectUri = String(query.redirect_uri || "");
+    const state = String(query.state || "");
+    const requestedScopes = String(query.scope || "read:ingredients read:products")
+      .split(/[\s,]+/)
+      .filter(Boolean);
+    const scopes = filterReadOnlyScopes(requestedScopes);
+    const scopeStr = scopes.join(" ");
+    const codeChallenge = query.code_challenge ? String(query.code_challenge) : undefined;
+    const codeChallengeMethod = query.code_challenge_method
+      ? String(query.code_challenge_method)
+      : undefined;
 
-    if (!redirectUri) {
+    if (!redirectUri || !isSafeRedirectUri(redirectUri)) {
       return res
         .status(HttpStatus.BAD_REQUEST)
-        .send("Missing required parameter: redirect_uri");
-    }
-
-    const scopes = scopeStr.split(/[\s,]+/).filter(Boolean);
-
-    if (autoApprove) {
-      const code = createAuthorizationCode({
-        clientId,
-        redirectUri,
-        scopes,
-        codeChallenge,
-        codeChallengeMethod,
-      });
-
-      const targetUrl = new URL(redirectUri);
-      targetUrl.searchParams.set("code", code);
-      if (state) targetUrl.searchParams.set("state", state);
-      return res.redirect(HttpStatus.FOUND, targetUrl.toString());
+        .send("Missing or invalid redirect_uri");
     }
 
     const html = `<!DOCTYPE html>
@@ -63,7 +73,7 @@ export class OAuthController {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>FoodRepo • Connect Gemini Spark</title>
+  <title>FoodRepo • Connect MCP Client</title>
   <style>
     :root {
       --bg: #0b0f19;
@@ -108,18 +118,18 @@ export class OAuthController {
 <body>
   <div class="auth-card">
     <h1>Connect to FoodRepo</h1>
-    <p><strong>\${clientId}</strong> is requesting access to your FoodRepo database via Model Context Protocol (MCP).</p>
+    <p><strong>${escapeHtml(clientId)}</strong> is requesting read-only access to FoodRepo via Model Context Protocol (MCP).</p>
     <div class="scopes">
-      <div style="color: var(--text-muted); margin-bottom: 0.5rem; font-weight: 600;">Requested Scopes:</div>
-      \${scopes.map(s => \`<div class="scope-item">✓ \${s}</div>\`).join("")}
+      <div style="color: var(--text-muted); margin-bottom: 0.5rem; font-weight: 600;">Granted Read-Only Scopes:</div>
+      ${scopes.map((s) => `<div class="scope-item">✓ ${escapeHtml(s)}</div>`).join("")}
     </div>
     <form method="POST">
-      <input type="hidden" name="client_id" value="\${clientId}">
-      <input type="hidden" name="redirect_uri" value="\${redirectUri}">
-      <input type="hidden" name="state" value="\${state}">
-      <input type="hidden" name="scope" value="\${scopeStr}">
-      \${codeChallenge ? \`<input type="hidden" name="code_challenge" value="\${codeChallenge}">\` : ""}
-      \${codeChallengeMethod ? \`<input type="hidden" name="code_challenge_method" value="\${codeChallengeMethod}">\` : ""}
+      <input type="hidden" name="client_id" value="${escapeHtml(clientId)}">
+      <input type="hidden" name="redirect_uri" value="${escapeHtml(redirectUri)}">
+      <input type="hidden" name="state" value="${escapeHtml(state)}">
+      <input type="hidden" name="scope" value="${escapeHtml(scopeStr)}">
+      ${codeChallenge ? `<input type="hidden" name="code_challenge" value="${escapeHtml(codeChallenge)}">` : ""}
+      ${codeChallengeMethod ? `<input type="hidden" name="code_challenge_method" value="${escapeHtml(codeChallengeMethod)}">` : ""}
       <div class="actions">
         <button type="button" class="btn-cancel" onclick="window.close()">Cancel</button>
         <button type="submit" class="btn-approve">Authorize</button>
@@ -138,19 +148,21 @@ export class OAuthController {
     @Body() body: any,
     @Res() res: Response,
   ) {
-    const clientId = body.client_id || "gemini-spark";
-    const redirectUri = body.redirect_uri;
-    const state = body.state || "";
-    const scopeStr =
-      body.scope || "read:ingredients write:ingredients read:products";
-    const codeChallenge = body.code_challenge || undefined;
-    const codeChallengeMethod = body.code_challenge_method || undefined;
+    const clientId = String(body.client_id || "gemini-spark");
+    const redirectUri = String(body.redirect_uri || "");
+    const state = String(body.state || "");
+    const requestedScopes = String(body.scope || "read:ingredients read:products")
+      .split(/[\s,]+/)
+      .filter(Boolean);
+    const scopes = filterReadOnlyScopes(requestedScopes);
+    const codeChallenge = body.code_challenge ? String(body.code_challenge) : undefined;
+    const codeChallengeMethod = body.code_challenge_method
+      ? String(body.code_challenge_method)
+      : undefined;
 
-    if (!redirectUri) {
-      return res.status(HttpStatus.BAD_REQUEST).send("Missing redirect_uri");
+    if (!redirectUri || !isSafeRedirectUri(redirectUri)) {
+      return res.status(HttpStatus.BAD_REQUEST).send("Missing or invalid redirect_uri");
     }
-
-    const scopes = scopeStr.split(/[\s,]+/).filter(Boolean);
 
     const code = createAuthorizationCode({
       clientId,
@@ -175,8 +187,8 @@ export class OAuthController {
     @Headers("authorization") authHeader: string,
     @Res() res: Response,
   ) {
-    let grantType = body?.grant_type || "";
-    let code = body?.code || "";
+    const grantType = body?.grant_type || "";
+    const code = body?.code || "";
     let clientId = body?.client_id || "";
     let clientSecret = body?.client_secret || "";
 
@@ -190,29 +202,26 @@ export class OAuthController {
     }
 
     const serverClientSecret = process.env.MCP_CLIENT_SECRET;
-    if (serverClientSecret && clientSecret) {
+    if (serverClientSecret && grantType === "client_credentials") {
+      if (!clientSecret) {
+        return res.status(HttpStatus.UNAUTHORIZED).json({
+          error: "invalid_client",
+          error_description: "Missing client_secret",
+        });
+      }
       const enteredBuf = Buffer.from(clientSecret);
       const expectedBuf = Buffer.from(serverClientSecret);
       const matchesSecret =
         enteredBuf.length === expectedBuf.length &&
         crypto.timingSafeEqual(enteredBuf, expectedBuf);
 
-      const apiKeyBuf = Buffer.from(process.env.MCP_API_KEY || "");
-      const matchesApiKey =
-        enteredBuf.length === apiKeyBuf.length &&
-        crypto.timingSafeEqual(enteredBuf, apiKeyBuf);
-
-      if (!matchesSecret && !matchesApiKey) {
+      if (!matchesSecret) {
         return res.status(HttpStatus.UNAUTHORIZED).json({
           error: "invalid_client",
           error_description: "Invalid client_secret",
         });
       }
     }
-
-    const token =
-      process.env.MCP_API_KEY ||
-      "mcp_live_6d3aa896ae8b901c56f32232d6444166f377fcc4b2e44564";
 
     if (grantType === "authorization_code") {
       if (!code) {
@@ -230,27 +239,45 @@ export class OAuthController {
         });
       }
 
+      const scopes = filterReadOnlyScopes(entry.scopes);
+      const token = signMcpToken(entry.clientId, scopes);
+      if (!token) {
+        return res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
+          error: "server_error",
+          error_description: "MCP token signing secret is not configured",
+        });
+      }
+
       return res
         .header("Cache-Control", "no-store")
         .header("Pragma", "no-cache")
         .json({
           access_token: token,
           token_type: "Bearer",
-          expires_in: 315360000,
+          expires_in: 86400 * 30,
           refresh_token: `ref_${crypto.randomBytes(24).toString("hex")}`,
-          scope: entry.scopes.join(" "),
+          scope: scopes.join(" "),
         });
     }
 
     if (grantType === "client_credentials" || grantType === "refresh_token") {
+      const scopes = [...READ_ONLY_MCP_SCOPES];
+      const token = signMcpToken(clientId || "oauth-client", scopes);
+      if (!token) {
+        return res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
+          error: "server_error",
+          error_description: "MCP token signing secret is not configured",
+        });
+      }
+
       return res
         .header("Cache-Control", "no-store")
         .header("Pragma", "no-cache")
         .json({
           access_token: token,
           token_type: "Bearer",
-          expires_in: 315360000,
-          scope: "read:ingredients write:ingredients read:products read:recipes admin:maintenance",
+          expires_in: 86400 * 30,
+          scope: scopes.join(" "),
         });
     }
 

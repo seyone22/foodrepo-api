@@ -123,88 +123,6 @@ export class McpService {
           },
         },
       },
-      {
-        name: "contribute_ingredient",
-        description:
-          "Add a newly discovered canonical ingredient into the knowledge base, automatically generating vector embeddings.",
-        annotations: {
-          title: "Contribute Canonical Ingredient",
-          readOnlyHint: false,
-          destructiveHint: false,
-        },
-        inputSchema: {
-          type: "object",
-          required: ["name"],
-          properties: {
-            name: {
-              type: "string",
-              description: "Canonical English or common title of the ingredient",
-            },
-            aliases: {
-              type: "array",
-              items: { type: "string" },
-              description: "Vernacular, regional, or scientific synonyms",
-            },
-            country: {
-              type: "array",
-              items: { type: "string" },
-              description: "Countries of primary cultivation or usage",
-            },
-            cuisine: {
-              type: "array",
-              items: { type: "string" },
-              description: "Associated cuisines (e.g. ['Sri Lankan', 'South Indian'])",
-            },
-            region: {
-              type: "array",
-              items: { type: "string" },
-              description: "Broader regional categories",
-            },
-            flavor_profile: {
-              type: "array",
-              items: { type: "string" },
-              description: "Taste and aromatic attributes",
-            },
-            dietary_flags: {
-              type: "array",
-              items: { type: "string" },
-              description: "Dietary categorizations (e.g. 'Vegan', 'Halal')",
-            },
-            comment: {
-              type: "string",
-              description: "Culinary notes or usage guidance",
-            },
-            photo: {
-              type: "string",
-              description: "Public URL of high-resolution representative photograph",
-            },
-          },
-        },
-      },
-      {
-        name: "update_ingredient",
-        description:
-          "Update an existing canonical ingredient record by ID with verified metadata or dietary flags.",
-        annotations: {
-          title: "Update Canonical Ingredient",
-          readOnlyHint: false,
-          destructiveHint: false,
-        },
-        inputSchema: {
-          type: "object",
-          required: ["id", "data"],
-          properties: {
-            id: {
-              type: "string",
-              description: "UUID of the ingredient to update",
-            },
-            data: {
-              type: "object",
-              description: "Key-value fields to update",
-            },
-          },
-        },
-      },
     ];
   }
 
@@ -248,17 +166,6 @@ export class McpService {
         assertScope(auth, "read:ingredients");
         if (!args.query?.trim()) throw new Error("Missing required parameter 'query'");
         return this.ingredientsService.getBestIngredientMatch(args.query.trim());
-      }
-
-      case "contribute_ingredient": {
-        assertScope(auth, "write:ingredients");
-        return this.ingredientsService.addIngredient(args);
-      }
-
-      case "update_ingredient": {
-        assertScope(auth, "write:ingredients");
-        if (!args.id) throw new Error("Missing required parameter 'id'");
-        return this.ingredientsService.updateIngredient(args.id, args.data || {});
       }
 
       default:
