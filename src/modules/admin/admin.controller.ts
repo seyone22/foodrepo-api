@@ -5,9 +5,11 @@ import {
   HttpCode,
   HttpStatus,
   Query,
+  UseGuards,
 } from "@nestjs/common";
 import { ApiOperation, ApiTags } from "@nestjs/swagger";
 import { ZodValidationPipe } from "nestjs-zod";
+import { AdminApiKeyGuard } from "../../common/guards/admin-api-key.guard";
 import { GetAuditLogsQueryDto, getAuditLogsQuerySchema } from "./dto/admin.dto";
 import { AdminService } from "./admin.service";
 
@@ -31,6 +33,7 @@ export class AdminController {
   }
 
   @Get("logs")
+  @UseGuards(AdminApiKeyGuard)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: "Fetch audit logs" })
   async getAuditLogs(
@@ -54,6 +57,7 @@ export class AdminController {
   }
 
   @Post("scraper/run")
+  @UseGuards(AdminApiKeyGuard)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: "Trigger manual GitHub scraper workflow" })
   async triggerScraper() {

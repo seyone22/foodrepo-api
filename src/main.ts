@@ -11,7 +11,7 @@ async function bootstrap() {
     origin: "*",
     methods: "GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS",
     allowedHeaders:
-      "Authorization, Content-Type, Mcp-Method, Mcp-Name, Mcp-Session-Id",
+      "Authorization, Content-Type, x-admin-api-key, Mcp-Method, Mcp-Name, Mcp-Session-Id",
   });
 
   // Global RFC 7807 problem details filter

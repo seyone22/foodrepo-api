@@ -11,9 +11,11 @@ import {
   Patch,
   Post,
   Query,
+  UseGuards,
 } from "@nestjs/common";
 import { ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags } from "@nestjs/swagger";
 import { ZodValidationPipe } from "nestjs-zod";
+import { AdminApiKeyGuard } from "../../common/guards/admin-api-key.guard";
 import { RecipeAiService } from "../recipes/recipe-ai.service";
 import {
   BulkIngredientsDto,
@@ -78,6 +80,7 @@ export class IngredientsController {
   }
 
   @Post()
+  @UseGuards(AdminApiKeyGuard)
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: "Add a new canonical ingredient" })
   async addIngredient(
@@ -141,6 +144,7 @@ export class IngredientsController {
   }
 
   @Post("enhance")
+  @UseGuards(AdminApiKeyGuard)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: "Bulk AI enrichment for ingredients (Collection / Batch Action)",
@@ -156,6 +160,7 @@ export class IngredientsController {
   }
 
   @Post("enhance/image")
+  @UseGuards(AdminApiKeyGuard)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: "Image waterfall fetch (Collection / Batch Action)",
@@ -246,6 +251,7 @@ export class IngredientsController {
   }
 
   @Patch(":id")
+  @UseGuards(AdminApiKeyGuard)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: "Update ingredient details" })
   @ApiParam({ name: "id", description: "Ingredient UUID" })
@@ -258,6 +264,7 @@ export class IngredientsController {
   }
 
   @Delete(":id")
+  @UseGuards(AdminApiKeyGuard)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: "Delete an ingredient" })
   @ApiParam({ name: "id", description: "Ingredient UUID" })
@@ -293,6 +300,7 @@ export class IngredientsController {
   }
 
   @Post(":id/enrich")
+  @UseGuards(AdminApiKeyGuard)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: "Enrich single ingredient with AI culinary metadata",
@@ -310,6 +318,7 @@ export class IngredientsController {
   }
 
   @Post(":id/image")
+  @UseGuards(AdminApiKeyGuard)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: "Fetch and score culinary image for single ingredient",

@@ -4,9 +4,11 @@ import {
   HttpCode,
   HttpStatus,
   Post,
+  UseGuards,
 } from "@nestjs/common";
 import { ApiOperation, ApiResponse, ApiTags } from "@nestjs/swagger";
 import { ZodValidationPipe } from "nestjs-zod";
+import { AdminApiKeyGuard } from "../../common/guards/admin-api-key.guard";
 import { CreateMappingDto, createMappingSchema } from "./dto/mappings.dto";
 import { MappingsService } from "./mappings.service";
 
@@ -16,6 +18,7 @@ export class MappingsController {
   constructor(private readonly mappingsService: MappingsService) {}
 
   @Post("create")
+  @UseGuards(AdminApiKeyGuard)
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: "Manually map a product to a canonical ingredient" })
   @ApiResponse({ status: 201, description: "Mapping successfully created" })
@@ -35,6 +38,7 @@ export class MappingsController {
   }
 
   @Post("unlink")
+  @UseGuards(AdminApiKeyGuard)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: "Unlink a product from an ingredient" })
   @ApiResponse({ status: 200, description: "Product unlinked" })
