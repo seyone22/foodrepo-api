@@ -131,10 +131,13 @@ export const updateIngredientSchema = z
 
 export class UpdateIngredientDto extends createZodDto(updateIngredientSchema) {}
 
+const hexUuidRegex =
+  /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
 export const mergeIngredientsSchema = z
   .object({
-    sourceId: z.string().uuid(),
-    targetId: z.string().uuid(),
+    sourceId: z.string().regex(hexUuidRegex, "Invalid UUID"),
+    targetId: z.string().regex(hexUuidRegex, "Invalid UUID"),
     addSourceNameAsAlias: z.boolean().optional().default(true),
   })
   .strict()
