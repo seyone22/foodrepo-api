@@ -122,6 +122,8 @@ export const ingredients = foodrepo.table("ingredients", {
   substitutes: text("substitutes").array(),
   pairsWith: text("pairs_with").array(),
   density: doublePrecision("density"),
+  reviewStatus: text("review_status"),
+  reviewReason: text("review_reason"),
 
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -130,6 +132,7 @@ export const ingredients = foodrepo.table("ingredients", {
   index("idx_ingredients_lower_name").on(sql`lower(${table.name})`),
   index("idx_ingredients_aliases_gin").using("gin", table.aliases),
   index("idx_ingredients_part_of_gin").using("gin", table.partOf),
+  index("idx_ingredients_review_status").on(table.reviewStatus),
 ]);
 
 export const priceSources = foodrepo.table("price_sources", {

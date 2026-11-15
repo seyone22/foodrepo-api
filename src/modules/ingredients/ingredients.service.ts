@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
 import { GoogleGenAI } from "@google/genai";
 import { db } from "@/database/database.module";
 import {
@@ -75,6 +79,8 @@ const ingredientColumns = {
   pairsWith: ingredients.pairsWith,
   density: ingredients.density,
   fdcId: ingredients.fdcId,
+  reviewStatus: ingredients.reviewStatus,
+  reviewReason: ingredients.reviewReason,
   lastModified: ingredients.lastModified,
   createdAt: ingredients.createdAt,
   updatedAt: ingredients.updatedAt,
@@ -499,18 +505,232 @@ export class IngredientsService {
     return created;
   }
 
+  private mergeStringArrays(
+    targetArr?: string[] | null,
+    sourceArr?: string[] | null,
+    extraItems: string[] = [],
+    excludeLower?: string,
+  ): string[] {
+    const seen = new Set<string>();
+    const merged: string[] = [];
+
+    for (const item of [
+      ...(targetArr || []),
+      ...(sourceArr || []),
+      ...extraItems,
+    ]) {
+      const trimmed = item?.trim();
+      if (!trimmed) continue;
+      const lower = trimmed.toLowerCase();
+      if (excludeLower && lower === excludeLower) continue;
+      if (!seen.has(lower)) {
+        seen.add(lower);
+        merged.push(trimmed);
+      }
+    }
+
+    return merged;
+  }
+
   async updateIngredient(id: string, data: any) {
     const pgId = toPgId(id);
-    const [updated] = await db
-      .update(ingredients)
-      .set({
-        ...data,
-        updatedAt: new Date(),
-      })
-      .where(eq(ingredients.id, pgId))
-      .returning();
+    try {
+      const [updated] = await db
+        .update(ingredients)
+        .set({
+          ...data,
+          updatedAt: new Date(),
+        })
+        .where(eq(ingredients.id, pgId))
+        .returning();
 
-    return updated || null;
+      return updated || null;
+    } catch (err: any) {
+      if (err?.code === "23503") {
+        throw new BadRequestException(
+          "Referenced fdcId does not exist in usda_foods",
+        );
+      }
+      if (err?.code === "23505") {
+        throw new BadRequestException(
+          "An ingredient with that name already exists",
+        );
+      }
+      throw err;
+    }
+  }
+
+  async mergeIngredients(
+    sourceId: string,
+    targetId: string,
+    addSourceNameAsAlias = true,
+  ) {
+    const sourcePgId = toPgId(sourceId);
+    const targetPgId = toPgId(targetId);
+
+    if (sourcePgId === targetPgId) {
+      throw new BadRequestException("sourceId and targetId must be different");
+    }
+
+    return db.transaction(async (tx) => {
+      const [source] = await tx
+        .select()
+        .from(ingredients)
+        .where(eq(ingredients.id, sourcePgId))
+        .limit(1);
+
+      if (!source) {
+        throw new NotFoundException(`Source ingredient ${sourceId} not found`);
+      }
+
+      const [target] = await tx
+        .select()
+        .from(ingredients)
+        .where(eq(ingredients.id, targetPgId))
+        .limit(1);
+
+      if (!target) {
+        throw new NotFoundException(`Target ingredient ${targetId} not found`);
+      }
+
+      const targetNameLower = target.name.trim().toLowerCase();
+      const extraAliases = addSourceNameAsAlias ? [source.name] : [];
+
+      const mergedAliases = this.mergeStringArrays(
+        target.aliases,
+        source.aliases,
+        extraAliases,
+        targetNameLower,
+      );
+      const mergedPartOf = this.mergeStringArrays(target.partOf, source.partOf);
+      const mergedVarieties = this.mergeStringArrays(
+        target.varieties,
+        source.varieties,
+      );
+      const mergedUsedIn = this.mergeStringArrays(target.usedIn, source.usedIn);
+      const mergedSubstitutes = this.mergeStringArrays(
+        target.substitutes,
+        source.substitutes,
+      );
+      const mergedPairsWith = this.mergeStringArrays(
+        target.pairsWith,
+        source.pairsWith,
+      );
+      const mergedFlavorProfile = this.mergeStringArrays(
+        target.flavorProfile,
+        source.flavorProfile,
+      );
+      const mergedDietaryFlags = this.mergeStringArrays(
+        target.dietaryFlags,
+        source.dietaryFlags,
+      );
+      const mergedCountry = this.mergeStringArrays(
+        target.country,
+        source.country,
+      );
+      const mergedCuisine = this.mergeStringArrays(
+        target.cuisine,
+        source.cuisine,
+      );
+      const mergedRegion = this.mergeStringArrays(target.region, source.region);
+
+      // Merge derivatives by lowercase name
+      const derivSeen = new Set<string>();
+      const mergedDerivatives = [
+        ...(target.derivatives || []),
+        ...(source.derivatives || []),
+      ].filter((d) => {
+        const key = d?.name?.trim().toLowerCase();
+        if (!key || derivSeen.has(key)) return false;
+        derivSeen.add(key);
+        return true;
+      });
+
+      const mergedImage =
+        target.image && target.image.missing === false
+          ? target.image
+          : source.image && source.image.missing === false
+            ? source.image
+            : target.image || source.image;
+
+      const [updatedTarget] = await tx
+        .update(ingredients)
+        .set({
+          aliases: mergedAliases,
+          partOf: mergedPartOf,
+          varieties: mergedVarieties,
+          usedIn: mergedUsedIn,
+          substitutes: mergedSubstitutes,
+          pairsWith: mergedPairsWith,
+          flavorProfile: mergedFlavorProfile,
+          dietaryFlags: mergedDietaryFlags,
+          country: mergedCountry,
+          cuisine: mergedCuisine,
+          region: mergedRegion,
+          derivatives: mergedDerivatives,
+          comment: target.comment || source.comment,
+          pronunciation: target.pronunciation || source.pronunciation,
+          density: target.density ?? source.density,
+          fdcId: target.fdcId ?? source.fdcId,
+          image: mergedImage,
+          updatedAt: new Date(),
+        })
+        .where(eq(ingredients.id, targetPgId))
+        .returning();
+
+      // Reassign any product mappings referencing sourcePgId -> targetPgId
+      const affectedMappings = await tx
+        .select({
+          id: mappings.id,
+          matchedIngredients: mappings.matchedIngredients,
+        })
+        .from(mappings)
+        .where(sql`${sourcePgId} = ANY(${mappings.matchedIngredients})`);
+
+      let mappingsUpdated = 0;
+      for (const m of affectedMappings) {
+        const nextIds = Array.from(
+          new Set(
+            (m.matchedIngredients || []).map((uid) =>
+              uid === sourcePgId ? targetPgId : uid,
+            ),
+          ),
+        );
+        await tx
+          .update(mappings)
+          .set({
+            matchedIngredients: nextIds,
+            updatedAt: new Date(),
+          })
+          .where(eq(mappings.id, m.id));
+        mappingsUpdated++;
+      }
+
+      await tx.delete(ingredients).where(eq(ingredients.id, sourcePgId));
+
+      await tx.insert(auditLogs).values({
+        type: "INGREDIENT_MERGE",
+        tag: "gap_filler",
+        status: "completed",
+        initiatedBy: "admin_api",
+        message: `Merged "${source.name}" (${sourcePgId}) into "${target.name}" (${targetPgId})`,
+        metadata: {
+          sourceId: sourcePgId,
+          sourceName: source.name,
+          targetId: targetPgId,
+          targetName: target.name,
+          mappingsUpdated,
+        },
+        endTime: new Date(),
+      });
+
+      return {
+        mergedInto: updatedTarget,
+        deletedSourceId: sourcePgId,
+        deletedSourceName: source.name,
+        mappingsUpdated,
+      };
+    });
   }
 
   async deleteIngredient(id: string) {

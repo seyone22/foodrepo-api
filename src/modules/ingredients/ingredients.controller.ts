@@ -34,6 +34,10 @@ import {
   parseIngredientsSchema,
   ParseCameraRecipeDto,
   parseCameraRecipeSchema,
+  UpdateIngredientDto,
+  updateIngredientSchema,
+  MergeIngredientsDto,
+  mergeIngredientsSchema,
 } from "./dto/ingredients.dto";
 import { IngredientsService } from "./ingredients.service";
 
@@ -250,12 +254,35 @@ export class IngredientsController {
     };
   }
 
+  @Post("merge")
+  @UseGuards(AdminApiKeyGuard)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: "Atomically merge a duplicate/noisy ingredient into a canonical target",
+  })
+  @ApiResponse({ status: 200, description: "Ingredients merged successfully." })
+  @ApiResponse({ status: 404, description: "Source or target ingredient not found." })
+  async mergeIngredients(
+    @Body(new ZodValidationPipe(mergeIngredientsSchema))
+    dto: MergeIngredientsDto,
+  ) {
+    return this.ingredientsService.mergeIngredients(
+      dto.sourceId,
+      dto.targetId,
+      dto.addSourceNameAsAlias,
+    );
+  }
+
   @Patch(":id")
   @UseGuards(AdminApiKeyGuard)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: "Update ingredient details" })
   @ApiParam({ name: "id", description: "Ingredient UUID" })
-  async updateIngredient(@Param("id") id: string, @Body() body: any) {
+  async updateIngredient(
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(updateIngredientSchema))
+    body: UpdateIngredientDto,
+  ) {
     const updated = await this.ingredientsService.updateIngredient(id, body);
     if (!updated) {
       throw new NotFoundException("Ingredient not found");
