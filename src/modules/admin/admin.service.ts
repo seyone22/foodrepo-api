@@ -96,7 +96,7 @@ export class AdminService {
         COUNT(*) FILTER (WHERE image->>'missing' = 'true' OR image IS NULL)::int AS missing_image,
         COUNT(*) FILTER (WHERE fdc_id IS NULL)::int AS missing_fdc,
         COUNT(*) FILTER (WHERE comment IS NULL OR comment = '')::int AS missing_comment,
-        COUNT(*) FILTER (WHERE varieties IS NULL OR cardinality(varieties) = 0)::int AS missing_varieties,
+        COUNT(*) FILTER (WHERE varieties IS NULL OR jsonb_array_length(varieties) = 0)::int AS missing_varieties,
         COUNT(*) FILTER (WHERE aliases IS NULL OR cardinality(aliases) = 0)::int AS missing_aliases
       FROM ${ingredients};
     `);

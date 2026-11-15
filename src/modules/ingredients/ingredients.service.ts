@@ -6,6 +6,8 @@ import {
 import { GoogleGenAI } from "@google/genai";
 import { db } from "@/database/database.module";
 import {
+  DerivativeItem,
+  IngredientLink,
   ingredients,
   mappings,
   priceHistories,
@@ -131,21 +133,30 @@ export class IngredientsService {
     const partOfChildren = await db
       .select({ id: ingredients.id })
       .from(ingredients)
-      .where(sql`${ingredients.partOf} @> ARRAY[${rootNameLower}]::text[]`);
+      .where(
+        sql`${ingredients.partOf} @> ${JSON.stringify([{ id: root.id }])}::jsonb OR EXISTS (SELECT 1 FROM jsonb_array_elements(${ingredients.partOf}) elem WHERE lower(elem->>'name') = ${rootNameLower})`,
+      );
 
     for (const c of partOfChildren) {
       visited.add(c.id);
     }
 
     if (root.varieties && root.varieties.length > 0) {
+      const varietyIds = root.varieties
+        .filter((v) => v?.id)
+        .map((v) => v.id as string);
       const varietyNames = root.varieties
-        .filter(Boolean)
-        .map((v) => v.trim().toLowerCase());
+        .filter((v) => !v?.id && v?.name?.trim())
+        .map((v) => v.name.trim().toLowerCase());
+
+      if (varietyIds.length > 0) {
+        for (const id of varietyIds) visited.add(id);
+      }
       if (varietyNames.length > 0) {
         const varietyChildren = await db
           .select({ id: ingredients.id })
           .from(ingredients)
-          .where(inArray(ingredients.name, varietyNames));
+          .where(inArray(sql`lower(${ingredients.name})`, varietyNames));
 
         for (const c of varietyChildren) {
           visited.add(c.id);
@@ -532,13 +543,154 @@ export class IngredientsService {
     return merged;
   }
 
+  private mergeLinkArrays(
+    targetArr: IngredientLink[] | null | undefined,
+    sourceArr: IngredientLink[] | null | undefined,
+    excludeIds: Set<string> = new Set(),
+    excludeNameLower?: string,
+  ): IngredientLink[] {
+    const seen = new Set<string>();
+    const merged: IngredientLink[] = [];
+
+    for (const item of [...(targetArr || []), ...(sourceArr || [])]) {
+      if (!item) continue;
+      const trimmedName = item.name?.trim();
+      const id = item.id ?? null;
+      if (!trimmedName && !id) continue;
+      if (id && excludeIds.has(id)) continue;
+      const lower = (trimmedName || "").toLowerCase();
+      if (excludeNameLower && lower === excludeNameLower) continue;
+      const key = id ? `id:${id}` : `name:${lower}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        merged.push({ id, name: trimmedName || id! });
+      }
+    }
+
+    return merged;
+  }
+
+  private async resolveIngredientLinks(
+    links: IngredientLink[],
+  ): Promise<IngredientLink[]> {
+    if (!links || links.length === 0) return [];
+
+    const idsToLookup = links
+      .filter((l) => l.id && (!l.name || l.name === l.id))
+      .map((l) => toPgId(l.id!));
+    const namesToLookup = links
+      .filter((l) => !l.id && l.name?.trim())
+      .map((l) => l.name.trim().toLowerCase());
+
+    const idToName = new Map<string, string>();
+    const nameToId = new Map<string, { id: string; name: string }>();
+
+    if (idsToLookup.length > 0) {
+      const rows = await db
+        .select({ id: ingredients.id, name: ingredients.name })
+        .from(ingredients)
+        .where(inArray(ingredients.id, idsToLookup));
+      for (const r of rows) {
+        idToName.set(r.id, r.name);
+      }
+    }
+
+    if (namesToLookup.length > 0) {
+      const rows = await db
+        .select({ id: ingredients.id, name: ingredients.name })
+        .from(ingredients)
+        .where(inArray(sql`lower(${ingredients.name})`, namesToLookup));
+      for (const r of rows) {
+        nameToId.set(r.name.trim().toLowerCase(), { id: r.id, name: r.name });
+      }
+    }
+
+    const seen = new Set<string>();
+    const resolved: IngredientLink[] = [];
+    for (const link of links) {
+      const trimmed = (link.name || "").trim();
+      let id = link.id ? toPgId(link.id) : null;
+      let name = trimmed;
+
+      if (id && idToName.has(id)) {
+        name = idToName.get(id)!;
+      } else if (!id && trimmed) {
+        const found = nameToId.get(trimmed.toLowerCase());
+        if (found) {
+          id = found.id;
+          name = found.name;
+        }
+      }
+
+      if (!name && !id) continue;
+      const key = id ? `id:${id}` : `name:${name.toLowerCase()}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        resolved.push({ id, name: name || id! });
+      }
+    }
+
+    return resolved;
+  }
+
+  private async resolveDerivativeTargetIds(
+    derivs: DerivativeItem[],
+  ): Promise<DerivativeItem[]> {
+    if (!derivs || derivs.length === 0) return [];
+    const namesToLookup = derivs
+      .filter((d) => !d.targetId && d.name?.trim())
+      .map((d) => d.name.trim().toLowerCase());
+
+    const nameToId = new Map<string, string>();
+    if (namesToLookup.length > 0) {
+      const rows = await db
+        .select({ id: ingredients.id, name: ingredients.name })
+        .from(ingredients)
+        .where(inArray(sql`lower(${ingredients.name})`, namesToLookup));
+      for (const r of rows) {
+        nameToId.set(r.name.trim().toLowerCase(), r.id);
+      }
+    }
+
+    return derivs.map((d) => {
+      if (!d.targetId && d.name?.trim()) {
+        const foundId = nameToId.get(d.name.trim().toLowerCase());
+        if (foundId) {
+          return { ...d, targetId: foundId };
+        }
+      }
+      return d;
+    });
+  }
+
   async updateIngredient(id: string, data: any) {
     const pgId = toPgId(id);
+    const payload = { ...data };
+    if (Array.isArray(payload.partOf)) {
+      payload.partOf = await this.resolveIngredientLinks(payload.partOf);
+    }
+    if (Array.isArray(payload.varieties)) {
+      payload.varieties = await this.resolveIngredientLinks(payload.varieties);
+    }
+    if (Array.isArray(payload.substitutes)) {
+      payload.substitutes = await this.resolveIngredientLinks(
+        payload.substitutes,
+      );
+    }
+    if (Array.isArray(payload.pairsWith)) {
+      payload.pairsWith = await this.resolveIngredientLinks(payload.pairsWith);
+    }
+    if (Array.isArray(payload.derivatives)) {
+      payload.derivatives = await this.resolveDerivativeTargetIds(
+        payload.derivatives,
+      );
+    }
+
     try {
       const [updated] = await db
         .update(ingredients)
         .set({
-          ...data,
+          ...payload,
           updatedAt: new Date(),
         })
         .where(eq(ingredients.id, pgId))
@@ -602,19 +754,31 @@ export class IngredientsService {
         extraAliases,
         targetNameLower,
       );
-      const mergedPartOf = this.mergeStringArrays(target.partOf, source.partOf);
-      const mergedVarieties = this.mergeStringArrays(
+      const excludeIds = new Set<string>([sourcePgId, targetPgId]);
+      const mergedPartOf = this.mergeLinkArrays(
+        target.partOf,
+        source.partOf,
+        excludeIds,
+        targetNameLower,
+      );
+      const mergedVarieties = this.mergeLinkArrays(
         target.varieties,
         source.varieties,
+        excludeIds,
+        targetNameLower,
       );
       const mergedUsedIn = this.mergeStringArrays(target.usedIn, source.usedIn);
-      const mergedSubstitutes = this.mergeStringArrays(
+      const mergedSubstitutes = this.mergeLinkArrays(
         target.substitutes,
         source.substitutes,
+        excludeIds,
+        targetNameLower,
       );
-      const mergedPairsWith = this.mergeStringArrays(
+      const mergedPairsWith = this.mergeLinkArrays(
         target.pairsWith,
         source.pairsWith,
+        excludeIds,
+        targetNameLower,
       );
       const mergedFlavorProfile = this.mergeStringArrays(
         target.flavorProfile,
@@ -896,6 +1060,15 @@ Use valid JSON only.`;
             updatedDerivatives = Array.from(mapByName.values());
           }
 
+          const enrichedSubs = (enriched.substitutes || []).map((s: any) =>
+            typeof s === "string"
+              ? { id: null, name: s.trim() }
+              : { id: s?.id ?? null, name: String(s?.name || "").trim() },
+          );
+          const mergedSubs = await this.resolveIngredientLinks(
+            this.mergeLinkArrays(ing.substitutes || [], enrichedSubs),
+          );
+
           const updateData: any = {
             aliases: mergeArrays(ing.aliases || [], enriched.aliases || []),
             country: mergeArrays(ing.country || [], enriched.country || []),
@@ -909,10 +1082,7 @@ Use valid JSON only.`;
               ing.dietaryFlags || [],
               enriched.dietaryFlags || [],
             ),
-            substitutes: mergeArrays(
-              ing.substitutes || [],
-              enriched.substitutes || [],
-            ),
+            substitutes: mergedSubs,
             derivatives: updatedDerivatives,
             comment: enriched.comment || ing.comment || null,
             pronunciation: enriched.pronunciation || ing.pronunciation || null,

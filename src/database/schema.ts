@@ -74,6 +74,11 @@ export const usdaFoods = foodrepo.table("usda_foods", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
+export interface IngredientLink {
+  id: string | null;
+  name: string;
+}
+
 export interface DerivativeItem {
   name: string;
   targetId?: string | null;
@@ -113,14 +118,22 @@ export const ingredients = foodrepo.table("ingredients", {
     }>()
     .default({ missing: true }),
 
-  partOf: text("part_of").array(),
+  partOf: jsonb("part_of")
+    .$type<IngredientLink[]>()
+    .default([]),
   derivatives: jsonb("derivatives")
     .$type<DerivativeItem[]>()
     .default([]),
-  varieties: text("varieties").array(),
+  varieties: jsonb("varieties")
+    .$type<IngredientLink[]>()
+    .default([]),
   usedIn: text("used_in").array(),
-  substitutes: text("substitutes").array(),
-  pairsWith: text("pairs_with").array(),
+  substitutes: jsonb("substitutes")
+    .$type<IngredientLink[]>()
+    .default([]),
+  pairsWith: jsonb("pairs_with")
+    .$type<IngredientLink[]>()
+    .default([]),
   density: doublePrecision("density"),
   reviewStatus: text("review_status"),
   reviewReason: text("review_reason"),

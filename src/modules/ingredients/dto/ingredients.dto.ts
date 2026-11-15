@@ -29,6 +29,32 @@ export class SearchIngredientsQueryDto extends createZodDto(
   searchIngredientsQuerySchema,
 ) {}
 
+const hexUuidRegex =
+  /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
+export const ingredientLinkSchema = z.object({
+  id: z.string().regex(hexUuidRegex, "Invalid UUID").optional().nullable(),
+  name: z.string().min(1).max(200),
+});
+
+export const ingredientLinkInputSchema = z.union([
+  ingredientLinkSchema.transform((obj) => ({
+    id: obj.id ?? null,
+    name: obj.name.trim(),
+  })),
+  z
+    .string()
+    .min(1)
+    .max(200)
+    .transform((val) => {
+      const trimmed = val.trim();
+      if (hexUuidRegex.test(trimmed)) {
+        return { id: trimmed, name: trimmed };
+      }
+      return { id: null, name: trimmed };
+    }),
+]);
+
 export const derivativeItemSchema = z.object({
   name: z.string().min(1),
   targetId: z.string().uuid().optional().nullable(),
@@ -114,12 +140,12 @@ export const updateIngredientSchema = z
     comment: z.string().max(5000).nullable().optional(),
     pronunciation: z.string().max(300).nullable().optional(),
     fdcId: z.number().int().positive().nullable().optional(),
-    partOf: z.array(z.string().min(1).max(200)).optional(),
+    partOf: z.array(ingredientLinkInputSchema).optional(),
     derivatives: z.array(derivativeInputSchema).optional(),
-    varieties: z.array(z.string().min(1).max(200)).optional(),
+    varieties: z.array(ingredientLinkInputSchema).optional(),
     usedIn: z.array(z.string().min(1).max(200)).optional(),
-    substitutes: z.array(z.string().min(1).max(200)).optional(),
-    pairsWith: z.array(z.string().min(1).max(200)).optional(),
+    substitutes: z.array(ingredientLinkInputSchema).optional(),
+    pairsWith: z.array(ingredientLinkInputSchema).optional(),
     density: z.number().positive().max(25).nullable().optional(),
     reviewStatus: z.enum(["flagged", "verified", "needs_review"]).nullable().optional(),
     reviewReason: z.string().max(1000).nullable().optional(),
@@ -130,9 +156,6 @@ export const updateIngredientSchema = z
   });
 
 export class UpdateIngredientDto extends createZodDto(updateIngredientSchema) {}
-
-const hexUuidRegex =
-  /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
 export const mergeIngredientsSchema = z
   .object({

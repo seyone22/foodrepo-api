@@ -1,7 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { db } from "@/database/database.module";
 import { usdaFoods } from "@/database/schema";
-import { ilike, sql, desc } from "drizzle-orm";
+import { and, desc, ilike, sql } from "drizzle-orm";
 
 @Injectable()
 export class UsdaService {
@@ -10,6 +10,12 @@ export class UsdaService {
     if (!clean || clean.length < 2) {
       return [];
     }
+
+    const tokens = clean.split(/\s+/).filter(Boolean);
+    const whereClause =
+      tokens.length > 1
+        ? and(...tokens.map((t) => ilike(usdaFoods.description, `%${t}%`)))
+        : ilike(usdaFoods.description, `%${clean}%`);
 
     const isStartsWith = sql<number>`CASE WHEN ${usdaFoods.description} ILIKE ${clean + "%"} THEN 1 ELSE 0 END`;
 
@@ -27,7 +33,7 @@ export class UsdaService {
         sugarG: usdaFoods.sugarG,
       })
       .from(usdaFoods)
-      .where(ilike(usdaFoods.description, `%${clean}%`))
+      .where(whereClause)
       .orderBy(desc(isStartsWith), usdaFoods.description)
       .limit(limit);
 

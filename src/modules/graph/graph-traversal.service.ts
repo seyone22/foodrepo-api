@@ -2,6 +2,7 @@ import { Injectable, Logger } from "@nestjs/common";
 import { desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/database/database.module";
 import {
+  IngredientLink,
   ingredients,
   mappings,
   priceHistories,
@@ -276,16 +277,16 @@ export class GraphTraversalService {
    */
   async resolveIngredientDensity(
     ingredientId: string,
-    initialPartOf?: string[] | null,
+    initialPartOf?: IngredientLink[] | null,
     initialDensity?: number | null,
   ): Promise<number> {
     if (initialDensity != null && initialDensity > 0) {
       return initialDensity;
     }
 
-    let queue: string[] = [];
+    let queue: IngredientLink[] = [];
     if (initialPartOf && Array.isArray(initialPartOf)) {
-      queue = initialPartOf.map((p) => p.trim().toLowerCase()).filter(Boolean);
+      queue = initialPartOf.filter((p) => p && (p.id || p.name?.trim()));
     } else {
       const ing = await db.query.ingredients.findFirst({
         where: eq(ingredients.id, ingredientId),
@@ -295,19 +296,22 @@ export class GraphTraversalService {
         return ing.density;
       }
       if (ing?.partOf && Array.isArray(ing.partOf)) {
-        queue = ing.partOf.map((p) => p.trim().toLowerCase()).filter(Boolean);
+        queue = ing.partOf.filter((p) => p && (p.id || p.name?.trim()));
       }
     }
 
     const visited = new Set<string>();
     while (queue.length > 0) {
-      const nextQueue: string[] = [];
-      for (const parentName of queue) {
-        if (visited.has(parentName)) continue;
-        visited.add(parentName);
+      const nextQueue: IngredientLink[] = [];
+      for (const link of queue) {
+        const visitKey = link.id || link.name.trim().toLowerCase();
+        if (!visitKey || visited.has(visitKey)) continue;
+        visited.add(visitKey);
 
         const parent = await db.query.ingredients.findFirst({
-          where: sql`LOWER(${ingredients.name}) = ${parentName}`,
+          where: link.id
+            ? eq(ingredients.id, link.id)
+            : sql`LOWER(${ingredients.name}) = ${link.name.trim().toLowerCase()}`,
           columns: { density: true, partOf: true },
         });
 
@@ -317,9 +321,9 @@ export class GraphTraversalService {
           }
           if (parent.partOf && Array.isArray(parent.partOf)) {
             for (const p of parent.partOf) {
-              const pClean = p.trim().toLowerCase();
-              if (pClean && !visited.has(pClean)) {
-                nextQueue.push(pClean);
+              const pKey = p?.id || p?.name?.trim().toLowerCase();
+              if (pKey && !visited.has(pKey)) {
+                nextQueue.push(p);
               }
             }
           }
@@ -372,14 +376,29 @@ export class GraphTraversalService {
     if (!options.disableChildAggregation || directProducts.length === 0) {
       let childIngredients: { id: string; name: string }[] = [];
       if (ing.varieties && Array.isArray(ing.varieties) && ing.varieties.length > 0) {
-        const declaredVars = ing.varieties
-          .filter(Boolean)
-          .map((v) => v.trim().toLowerCase());
-        if (declaredVars.length > 0) {
-          childIngredients = await db
+        const varIds = ing.varieties
+          .filter((v) => v?.id)
+          .map((v) => v.id as string);
+        const varNames = ing.varieties
+          .filter((v) => !v?.id && v?.name?.trim())
+          .map((v) => v.name.trim().toLowerCase());
+
+        if (varIds.length > 0) {
+          const byIdRows = await db
             .select({ id: ingredients.id, name: ingredients.name })
             .from(ingredients)
-            .where(inArray(sql`lower(${ingredients.name})`, declaredVars));
+            .where(inArray(ingredients.id, varIds));
+          childIngredients.push(...byIdRows);
+        }
+        if (varNames.length > 0) {
+          const byNameRows = await db
+            .select({ id: ingredients.id, name: ingredients.name })
+            .from(ingredients)
+            .where(inArray(sql`lower(${ingredients.name})`, varNames));
+          const seen = new Set(childIngredients.map((c) => c.id));
+          for (const row of byNameRows) {
+            if (!seen.has(row.id)) childIngredients.push(row);
+          }
         }
       }
 
@@ -468,6 +487,7 @@ export class GraphTraversalService {
       const derivativeParent = await this.findParentByDerivativeName(
         ing.name,
         options.allowedSources,
+        ing.id,
       );
       if (derivativeParent && derivativeParent.products.length > 0) {
         return derivativeParent;
@@ -480,12 +500,16 @@ export class GraphTraversalService {
       ing.substitutes &&
       Array.isArray(ing.substitutes)
     ) {
-      for (const subName of ing.substitutes) {
-        const subClean = subName.trim().toLowerCase();
-        if (!subClean || ABSTRACT_TAXONOMY_BLACKLIST.has(subClean)) continue;
+      for (const sub of ing.substitutes) {
+        if (!sub) continue;
+        const subClean = (sub.name || "").trim().toLowerCase();
+        if (subClean && ABSTRACT_TAXONOMY_BLACKLIST.has(subClean)) continue;
+        if (!sub.id && !subClean) continue;
 
         const subIng = await db.query.ingredients.findFirst({
-          where: sql`LOWER(${ingredients.name}) = ${subClean}`,
+          where: sub.id
+            ? eq(ingredients.id, sub.id)
+            : sql`LOWER(${ingredients.name}) = ${subClean}`,
           columns: { id: true, name: true, image: true, density: true },
         });
 
@@ -526,31 +550,38 @@ export class GraphTraversalService {
 
     // 4. Upward ancestor traversal (partOf) with prioritization of specific food nouns
     const maxLevel = options.maxAncestorLevel ?? 4;
-    let currentParents = (ing.partOf || [])
-      .map((p) => p.trim().toLowerCase())
-      .filter((p) => Boolean(p) && !ABSTRACT_TAXONOMY_BLACKLIST.has(p));
+    let currentParents: IngredientLink[] = (ing.partOf || []).filter((p) => {
+      if (!p) return false;
+      const pName = (p.name || "").trim().toLowerCase();
+      return Boolean(p.id || pName) && !ABSTRACT_TAXONOMY_BLACKLIST.has(pName);
+    });
 
     currentParents.sort((a, b) => {
-      const aGen = GENERIC_PARENT_NOUNS.has(a) ? 1 : 0;
-      const bGen = GENERIC_PARENT_NOUNS.has(b) ? 1 : 0;
+      const aGen = GENERIC_PARENT_NOUNS.has((a.name || "").trim().toLowerCase()) ? 1 : 0;
+      const bGen = GENERIC_PARENT_NOUNS.has((b.name || "").trim().toLowerCase()) ? 1 : 0;
       return aGen - bGen;
     });
 
     let level = 1;
-    const visitedParents = new Set<string>([nameLower]);
+    const visitedParents = new Set<string>([ing.id, nameLower]);
 
     while (currentParents.length > 0 && level <= maxLevel) {
-      const nextParents: string[] = [];
+      const nextParents: IngredientLink[] = [];
 
-      for (const parentName of currentParents) {
-        if (visitedParents.has(parentName)) continue;
-        visitedParents.add(parentName);
+      for (const parentLink of currentParents) {
+        const parentNameLower = (parentLink.name || "").trim().toLowerCase();
+        const visitKey = parentLink.id || parentNameLower;
+        if (!visitKey || visitedParents.has(visitKey)) continue;
+        visitedParents.add(visitKey);
+        if (parentNameLower) visitedParents.add(parentNameLower);
 
         // Never resolve into abstract taxonomy blacklisted categories
-        if (ABSTRACT_TAXONOMY_BLACKLIST.has(parentName)) continue;
+        if (ABSTRACT_TAXONOMY_BLACKLIST.has(parentNameLower)) continue;
 
         const parentIng = await db.query.ingredients.findFirst({
-          where: sql`LOWER(${ingredients.name}) = ${parentName}`,
+          where: parentLink.id
+            ? eq(ingredients.id, parentLink.id)
+            : sql`LOWER(${ingredients.name}) = ${parentNameLower}`,
           columns: { id: true, name: true, image: true, partOf: true },
         });
 
@@ -582,13 +613,15 @@ export class GraphTraversalService {
 
           if (parentIng.partOf && Array.isArray(parentIng.partOf)) {
             for (const p of parentIng.partOf) {
-              const pClean = p.trim().toLowerCase();
+              if (!p) continue;
+              const pClean = (p.name || "").trim().toLowerCase();
+              const pKey = p.id || pClean;
               if (
-                pClean &&
-                !visitedParents.has(pClean) &&
+                pKey &&
+                !visitedParents.has(pKey) &&
                 !ABSTRACT_TAXONOMY_BLACKLIST.has(pClean)
               ) {
-                nextParents.push(pClean);
+                nextParents.push(p);
               }
             }
           }
@@ -596,8 +629,8 @@ export class GraphTraversalService {
       }
 
       nextParents.sort((a, b) => {
-        const aGen = GENERIC_PARENT_NOUNS.has(a) ? 1 : 0;
-        const bGen = GENERIC_PARENT_NOUNS.has(b) ? 1 : 0;
+        const aGen = GENERIC_PARENT_NOUNS.has((a.name || "").trim().toLowerCase()) ? 1 : 0;
+        const bGen = GENERIC_PARENT_NOUNS.has((b.name || "").trim().toLowerCase()) ? 1 : 0;
         return aGen - bGen;
       });
 
@@ -614,9 +647,14 @@ export class GraphTraversalService {
   async findParentByDerivativeName(
     derivativeName: string,
     allowedSources?: string[],
+    targetId?: string,
   ): Promise<TraversalResolution | null> {
     const clean = derivativeName.trim().toLowerCase();
-    if (!clean || clean.length < 3) return null;
+    if (!targetId && (!clean || clean.length < 3)) return null;
+
+    const matchCondition = targetId
+      ? sql`(elem->>'targetId' = ${targetId} OR lower(elem->>'name') = ${clean} OR lower(elem->>'name') = ${clean + 's'} OR lower(elem->>'name') || 's' = ${clean})`
+      : sql`(lower(elem->>'name') = ${clean} OR lower(elem->>'name') = ${clean + 's'} OR lower(elem->>'name') || 's' = ${clean})`;
 
     const query = sql`
       SELECT id, name, derivatives, density, image
@@ -626,11 +664,7 @@ export class GraphTraversalService {
         AND EXISTS (
           SELECT 1
           FROM jsonb_array_elements(derivatives) elem
-          WHERE (
-            lower(elem->>'name') = ${clean}
-            OR lower(elem->>'name') = ${clean + 's'}
-            OR lower(elem->>'name') || 's' = ${clean}
-          )
+          WHERE ${matchCondition}
           AND elem->>'yieldRatio' IS NOT NULL
         )
       ORDER BY
