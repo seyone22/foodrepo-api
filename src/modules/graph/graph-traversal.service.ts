@@ -741,6 +741,19 @@ export class GraphTraversalService {
     return promise;
   }
 
+  private async resolveFirstWithProducts(
+    candidates: Array<{ id: string }>,
+    options: TraversalOptions,
+  ): Promise<TraversalResolution | null> {
+    for (const cand of candidates) {
+      const resolved = await this.resolveByIngredientId(cand.id, options);
+      if (resolved && resolved.products.length > 0) {
+        return resolved;
+      }
+    }
+    return null;
+  }
+
   private async executeResolveByNameOrQuery(
     clean: string,
     options: TraversalOptions,
@@ -758,17 +771,16 @@ export class GraphTraversalService {
       }
     }
 
-    // Stage 2: Match against aliases
-    const aliasIng = await db.query.ingredients.findFirst({
+    // Stage 2: Match against aliases (iterate all matches in case duplicate nodes share an alias)
+    const aliasIngs = await db.query.ingredients.findMany({
       where: sql`${clean} = ANY(SELECT lower(unnest(${ingredients.aliases})))`,
       columns: { id: true, name: true },
+      limit: 10,
     });
 
-    if (aliasIng) {
-      const resolved = await this.resolveByIngredientId(aliasIng.id, options);
-      if (resolved && resolved.products.length > 0) {
-        return resolved;
-      }
+    const aliasResolved = await this.resolveFirstWithProducts(aliasIngs, options);
+    if (aliasResolved) {
+      return aliasResolved;
     }
 
     // Stage 2.1: Singular / Plural inflection normalization (e.g. "apples" <-> "apple", "tomatoes" <-> "tomato")
@@ -797,15 +809,14 @@ export class GraphTraversalService {
         }
       }
 
-      const infAlias = await db.query.ingredients.findFirst({
+      const infAliases = await db.query.ingredients.findMany({
         where: sql`${inf} = ANY(SELECT lower(unnest(${ingredients.aliases})))`,
         columns: { id: true, name: true },
+        limit: 10,
       });
-      if (infAlias) {
-        const resolved = await this.resolveByIngredientId(infAlias.id, options);
-        if (resolved && resolved.products.length > 0) {
-          return resolved;
-        }
+      const infAliasResolved = await this.resolveFirstWithProducts(infAliases, options);
+      if (infAliasResolved) {
+        return infAliasResolved;
       }
     }
 
@@ -828,15 +839,14 @@ export class GraphTraversalService {
         }
       }
 
-      const strippedAlias = await db.query.ingredients.findFirst({
+      const strippedAliases = await db.query.ingredients.findMany({
         where: sql`${strippedClean} = ANY(SELECT lower(unnest(${ingredients.aliases})))`,
         columns: { id: true, name: true },
+        limit: 10,
       });
-      if (strippedAlias) {
-        const resolved = await this.resolveByIngredientId(strippedAlias.id, options);
-        if (resolved && resolved.products.length > 0) {
-          return resolved;
-        }
+      const strippedAliasResolved = await this.resolveFirstWithProducts(strippedAliases, options);
+      if (strippedAliasResolved) {
+        return strippedAliasResolved;
       }
     }
 
