@@ -48,7 +48,8 @@ async function runStandardTests() {
     const appleIngRes = await sql`
       SELECT varieties FROM foodrepo.ingredients WHERE name = 'apple';
     `;
-    const appleVarieties = appleIngRes[0]?.varieties || [];
+    const extractNames = (arr) => (arr || []).map((item) => (typeof item === 'string' ? item : item?.name)).filter(Boolean);
+    const appleVarieties = extractNames(appleIngRes[0]?.varieties);
     assert(!appleVarieties.includes('wood apple'), 'Apple varieties does not include wood apple');
     assert(!appleVarieties.includes('custard apple'), 'Apple varieties does not include custard apple');
     assert(!appleVarieties.includes('rose apple'), 'Apple varieties does not include rose apple');
@@ -59,7 +60,7 @@ async function runStandardTests() {
     const teaRes = await sql`
       SELECT part_of FROM foodrepo.ingredients WHERE name = 'tea';
     `;
-    const teaParts = teaRes[0]?.part_of || [];
+    const teaParts = extractNames(teaRes[0]?.part_of);
     assert(!teaParts.includes('sugar'), 'Tea does not contain sugar in part_of');
 
     // Check granulated sugar mapping
