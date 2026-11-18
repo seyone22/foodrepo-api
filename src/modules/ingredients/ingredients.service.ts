@@ -28,6 +28,7 @@ import {
   desc,
   eq,
   inArray,
+  isNull,
   sql,
   type SQL,
 } from "drizzle-orm";
@@ -1076,7 +1077,9 @@ export class IngredientsService {
       sql`(${ingredients.claimedUntil} IS NULL OR ${ingredients.claimedUntil} < NOW())`,
     ];
 
-    if (options.reviewStatus) {
+    if (options.reviewStatus === "unreviewed") {
+      filterConditions.push(isNull(ingredients.reviewStatus));
+    } else if (options.reviewStatus) {
       filterConditions.push(eq(ingredients.reviewStatus, options.reviewStatus));
     }
     if (options.provenance) {

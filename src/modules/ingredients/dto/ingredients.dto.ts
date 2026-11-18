@@ -192,7 +192,9 @@ export class LinkPartOfDto extends createZodDto(linkPartOfSchema) {}
 export const claimIngredientsSchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).optional().default(25),
   claimMinutes: z.coerce.number().int().min(1).max(120).optional().default(10),
-  reviewStatus: z.enum(["flagged", "verified", "needs_review"]).optional(),
+  reviewStatus: z
+    .enum(["flagged", "verified", "needs_review", "unreviewed"])
+    .optional(),
   provenance: z.string().min(1).max(100).optional(),
 });
 
