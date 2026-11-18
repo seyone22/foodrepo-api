@@ -15,9 +15,11 @@ import {
   eq,
   ilike,
   inArray,
+  notExists,
   or,
   sql,
   isNull,
+  type SQL,
 } from "drizzle-orm";
 import { toPgId } from "@/common/utils/uuid.util";
 
@@ -48,9 +50,27 @@ const productColumns = {
   dietaryType: products.dietaryType,
   packSize: products.packSize,
   searchTerms: products.searchTerms,
+  claimedUntil: products.claimedUntil,
   createdAt: products.createdAt,
   updatedAt: products.updatedAt,
 };
+
+const DEFAULT_NON_FOOD_CATEGORIES = [
+  "household",
+  "health & beauty",
+  "personal care",
+  "pet care",
+  "stationery",
+  "home & living",
+  "homeware",
+  "pharmacy",
+  "baby care",
+  "baby products",
+  "cleaning",
+  "electronics",
+  "hardware",
+  "cosmetics",
+];
 
 @Injectable()
 export class ProductsService {
@@ -159,23 +179,100 @@ export class ProductsService {
     return { products: rows, total: rows.length };
   }
 
-  async getRandomUnmappedProduct() {
-    const rows = await db
-      .select({
-        ...productColumns,
-        source: {
-          id: priceSources.id,
-          name: priceSources.name,
-        },
-      })
-      .from(products)
-      .leftJoin(priceSources, eq(products.sourceId, priceSources.id))
-      .leftJoin(mappings, eq(mappings.productId, products.id))
-      .where(isNull(mappings.id))
-      .orderBy(sql`RANDOM()`)
-      .limit(1);
+  async getRandomUnmappedProducts(options: {
+    limit?: number;
+    claimMinutes?: number;
+    excludeNonFood?: boolean;
+    excludeCategories?: string;
+  } = {}) {
+    const limit = Math.min(Math.max(options.limit ?? 1, 1), 100);
+    const conditions: SQL[] = [
+      notExists(
+        db
+          .select({ id: mappings.id })
+          .from(mappings)
+          .where(eq(mappings.productId, products.id)),
+      ),
+      sql`(${products.claimedUntil} IS NULL OR ${products.claimedUntil} < NOW())`,
+    ];
 
-    return { product: rows[0] || null };
+    const excludedTerms: string[] = [];
+    if (options.excludeNonFood) {
+      excludedTerms.push(...DEFAULT_NON_FOOD_CATEGORIES);
+    }
+    if (options.excludeCategories) {
+      for (const term of options.excludeCategories.split(",")) {
+        const trimmed = term.trim().toLowerCase();
+        if (trimmed) excludedTerms.push(trimmed);
+      }
+    }
+
+    for (const term of new Set(excludedTerms)) {
+      conditions.push(
+        sql`(${products.categoryPath} IS NULL OR lower(array_to_string(${products.categoryPath}, ' ')) NOT LIKE ${`%${term}%`})`,
+      );
+    }
+
+    const whereClause = and(...conditions);
+
+    let rows: any[];
+    if (options.claimMinutes && options.claimMinutes > 0) {
+      const claimExpiry = new Date(
+        Date.now() + options.claimMinutes * 60 * 1000,
+      );
+
+      rows = await db.transaction(async (tx) => {
+        const candidates = await tx
+          .select({ id: products.id })
+          .from(products)
+          .where(whereClause)
+          .orderBy(sql`RANDOM()`)
+          .for("update", { skipLocked: true })
+          .limit(limit);
+
+        if (candidates.length === 0) {
+          return [];
+        }
+
+        const ids = candidates.map((c) => c.id);
+        await tx
+          .update(products)
+          .set({ claimedUntil: claimExpiry })
+          .where(inArray(products.id, ids));
+
+        return tx
+          .select({
+            ...productColumns,
+            source: {
+              id: priceSources.id,
+              name: priceSources.name,
+            },
+          })
+          .from(products)
+          .leftJoin(priceSources, eq(products.sourceId, priceSources.id))
+          .where(inArray(products.id, ids));
+      });
+    } else {
+      rows = await db
+        .select({
+          ...productColumns,
+          source: {
+            id: priceSources.id,
+            name: priceSources.name,
+          },
+        })
+        .from(products)
+        .leftJoin(priceSources, eq(products.sourceId, priceSources.id))
+        .where(whereClause)
+        .orderBy(sql`RANDOM()`)
+        .limit(limit);
+    }
+
+    return {
+      product: rows[0] || null,
+      products: rows,
+      count: rows.length,
+    };
   }
 
   async getProductStockHistory(productId: string): Promise<number[]> {

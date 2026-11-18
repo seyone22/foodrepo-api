@@ -24,3 +24,17 @@ export const fetchProductsByIdsSchema = z.object({
 export class FetchProductsByIdsDto extends createZodDto(
   fetchProductsByIdsSchema,
 ) {}
+
+export const randomUnmappedProductsQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).optional().default(1),
+  claimMinutes: z.coerce.number().int().min(1).max(120).optional(),
+  excludeNonFood: z
+    .string()
+    .optional()
+    .transform((val) => val === "true" || val === "1"),
+  excludeCategories: z.string().optional(),
+});
+
+export class RandomUnmappedProductsQueryDto extends createZodDto(
+  randomUnmappedProductsQuerySchema,
+) {}

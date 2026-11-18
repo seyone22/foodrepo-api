@@ -4,6 +4,7 @@ import {
   Controller,
   Delete,
   Get,
+  Headers,
   HttpCode,
   HttpStatus,
   NotFoundException,
@@ -11,8 +12,10 @@ import {
   Patch,
   Post,
   Query,
+  Res,
   UseGuards,
 } from "@nestjs/common";
+import type { Response } from "express";
 import { ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags } from "@nestjs/swagger";
 import { ZodValidationPipe } from "nestjs-zod";
 import { AdminApiKeyGuard } from "../../common/guards/admin-api-key.guard";
@@ -20,8 +23,14 @@ import { RecipeAiService } from "../recipes/recipe-ai.service";
 import {
   BulkIngredientsDto,
   bulkIngredientsSchema,
+  ClaimIngredientsDto,
+  claimIngredientsSchema,
   CreateIngredientDto,
   createIngredientSchema,
+  LinkPartOfDto,
+  linkPartOfSchema,
+  LinkVarietyDto,
+  linkVarietySchema,
   MatchIngredientDto,
   matchIngredientSchema,
   SearchIngredientsQueryDto,
@@ -216,6 +225,21 @@ export class IngredientsController {
     }
   }
 
+  @Post("claim")
+  @UseGuards(AdminApiKeyGuard)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: "Atomically claim a batch of ingredients with a short-lived lease",
+    description:
+      "Uses FOR UPDATE SKIP LOCKED to guarantee disjoint batches across concurrent workers.",
+  })
+  async claimIngredients(
+    @Query(new ZodValidationPipe(claimIngredientsSchema))
+    queryDto: ClaimIngredientsDto,
+  ) {
+    return this.ingredientsService.claimIngredients(queryDto);
+  }
+
   @Get(":id")
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -235,6 +259,7 @@ export class IngredientsController {
   async getIngredientById(
     @Param("id") id: string,
     @Query("includeProducts") includeProducts?: string,
+    @Res({ passthrough: true }) res?: Response,
   ) {
     const withProducts = includeProducts === "true";
     const data = await this.ingredientsService.getIngredientById(
@@ -247,6 +272,12 @@ export class IngredientsController {
     }
 
     const { products, ...ingredient } = data;
+    if (res && ingredient.updatedAt) {
+      res.setHeader(
+        "ETag",
+        `"${new Date(ingredient.updatedAt).toISOString()}"`,
+      );
+    }
 
     return {
       ingredient,
@@ -276,18 +307,135 @@ export class IngredientsController {
   @Patch(":id")
   @UseGuards(AdminApiKeyGuard)
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: "Update ingredient details" })
+  @ApiOperation({
+    summary: "Update ingredient details (with optimistic concurrency)",
+  })
   @ApiParam({ name: "id", description: "Ingredient UUID" })
+  @ApiResponse({ status: 200, description: "Ingredient updated." })
+  @ApiResponse({ status: 409, description: "Concurrent modification or merged redirect." })
+  @ApiResponse({ status: 428, description: "If-Match header or expectedUpdatedAt required." })
   async updateIngredient(
     @Param("id") id: string,
     @Body(new ZodValidationPipe(updateIngredientSchema))
     body: UpdateIngredientDto,
+    @Headers("if-match") ifMatch?: string,
+    @Res({ passthrough: true }) res?: Response,
   ) {
-    const updated = await this.ingredientsService.updateIngredient(id, body);
+    const updated = await this.ingredientsService.updateIngredient(
+      id,
+      body,
+      ifMatch,
+    );
     if (!updated) {
       throw new NotFoundException("Ingredient not found");
     }
+    if (res && updated.updatedAt) {
+      res.setHeader(
+        "ETag",
+        `"${new Date(updated.updatedAt).toISOString()}"`,
+      );
+    }
     return { message: "Updated", ingredient: updated };
+  }
+
+  @Post(":id/varieties")
+  @UseGuards(AdminApiKeyGuard)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: "Atomically link a variety to an ingredient" })
+  @ApiParam({ name: "id", description: "Parent ingredient UUID" })
+  async linkVariety(
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(linkVarietySchema))
+    body: LinkVarietyDto,
+    @Res({ passthrough: true }) res?: Response,
+  ) {
+    const result = await this.ingredientsService.linkVariety(id, body);
+    if (res && result.ingredient?.updatedAt) {
+      res.setHeader(
+        "ETag",
+        `"${new Date(result.ingredient.updatedAt).toISOString()}"`,
+      );
+    }
+    return {
+      message: result.added ? "Variety linked" : "Variety already linked",
+      added: result.added,
+      ingredient: result.ingredient,
+    };
+  }
+
+  @Delete(":id/varieties/:varietyId")
+  @UseGuards(AdminApiKeyGuard)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: "Atomically unlink a variety from an ingredient" })
+  @ApiParam({ name: "id", description: "Parent ingredient UUID" })
+  @ApiParam({ name: "varietyId", description: "Variety ingredient UUID" })
+  async unlinkVariety(
+    @Param("id") id: string,
+    @Param("varietyId") varietyId: string,
+    @Res({ passthrough: true }) res?: Response,
+  ) {
+    const result = await this.ingredientsService.unlinkVariety(id, varietyId);
+    if (res && result.ingredient?.updatedAt) {
+      res.setHeader(
+        "ETag",
+        `"${new Date(result.ingredient.updatedAt).toISOString()}"`,
+      );
+    }
+    return {
+      message: result.removed ? "Variety unlinked" : "Variety not present",
+      removed: result.removed,
+      ingredient: result.ingredient,
+    };
+  }
+
+  @Post(":id/part-of")
+  @UseGuards(AdminApiKeyGuard)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: "Atomically link a parent ingredient to partOf" })
+  @ApiParam({ name: "id", description: "Child ingredient UUID" })
+  async linkPartOf(
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(linkPartOfSchema))
+    body: LinkPartOfDto,
+    @Res({ passthrough: true }) res?: Response,
+  ) {
+    const result = await this.ingredientsService.linkPartOf(id, body);
+    if (res && result.ingredient?.updatedAt) {
+      res.setHeader(
+        "ETag",
+        `"${new Date(result.ingredient.updatedAt).toISOString()}"`,
+      );
+    }
+    return {
+      message: result.added ? "Parent linked" : "Parent already linked",
+      added: result.added,
+      ingredient: result.ingredient,
+    };
+  }
+
+  @Delete(":id/part-of/:parentId")
+  @UseGuards(AdminApiKeyGuard)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: "Atomically unlink a parent ingredient from partOf" })
+  @ApiParam({ name: "id", description: "Child ingredient UUID" })
+  @ApiParam({ name: "parentId", description: "Parent ingredient UUID" })
+  async unlinkPartOf(
+    @Param("id") id: string,
+    @Param("parentId") parentId: string,
+    @Res({ passthrough: true }) res?: Response,
+  ) {
+    const result = await this.ingredientsService.unlinkPartOf(id, parentId);
+    if (res && result.ingredient?.updatedAt) {
+      res.setHeader(
+        "ETag",
+        `"${new Date(result.ingredient.updatedAt).toISOString()}"`,
+      );
+    }
+    return {
+      message: result.removed ? "Parent unlinked" : "Parent not present",
+      removed: result.removed,
+      ingredient: result.ingredient,
+    };
   }
 
   @Delete(":id")

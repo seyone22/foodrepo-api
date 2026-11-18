@@ -149,13 +149,54 @@ export const updateIngredientSchema = z
     density: z.number().positive().max(25).nullable().optional(),
     reviewStatus: z.enum(["flagged", "verified", "needs_review"]).nullable().optional(),
     reviewReason: z.string().max(1000).nullable().optional(),
+    expectedUpdatedAt: z
+      .union([z.string().min(1), z.number().finite()])
+      .optional(),
   })
   .strict()
-  .refine((data) => Object.keys(data).length > 0, {
-    message: "At least one updatable field must be provided",
-  });
+  .refine(
+    (data) => Object.keys(data).some((k) => k !== "expectedUpdatedAt"),
+    {
+      message: "At least one updatable field must be provided",
+    },
+  );
 
 export class UpdateIngredientDto extends createZodDto(updateIngredientSchema) {}
+
+export const linkVarietySchema = z
+  .object({
+    varietyId: z.string().regex(hexUuidRegex, "Invalid UUID").optional(),
+    id: z.string().regex(hexUuidRegex, "Invalid UUID").optional(),
+    name: z.string().min(1).max(200).optional(),
+  })
+  .strict()
+  .refine((data) => Boolean(data.varietyId || data.id || data.name), {
+    message: "varietyId, id, or name must be provided",
+  });
+
+export class LinkVarietyDto extends createZodDto(linkVarietySchema) {}
+
+export const linkPartOfSchema = z
+  .object({
+    parentId: z.string().regex(hexUuidRegex, "Invalid UUID").optional(),
+    id: z.string().regex(hexUuidRegex, "Invalid UUID").optional(),
+    name: z.string().min(1).max(200).optional(),
+  })
+  .strict()
+  .refine((data) => Boolean(data.parentId || data.id || data.name), {
+    message: "parentId, id, or name must be provided",
+  });
+
+export class LinkPartOfDto extends createZodDto(linkPartOfSchema) {}
+
+export const claimIngredientsSchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).optional().default(25),
+  claimMinutes: z.coerce.number().int().min(1).max(120).optional().default(10),
+  reviewStatus: z.enum(["flagged", "verified", "needs_review"]).optional(),
+  provenance: z.string().min(1).max(100).optional(),
+});
+
+export class ClaimIngredientsDto extends createZodDto(claimIngredientsSchema) {}
 
 export const mergeIngredientsSchema = z
   .object({

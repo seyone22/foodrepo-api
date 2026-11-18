@@ -1,11 +1,38 @@
 import { Injectable, BadRequestException } from "@nestjs/common";
 import { db } from "@/database/database.module";
-import { mappings, products, auditLogs } from "@/database/schema";
+import {
+  ingredientRedirects,
+  ingredients,
+  mappings,
+  products,
+  auditLogs,
+} from "@/database/schema";
 import { eq } from "drizzle-orm";
 import { toPgId } from "@/common/utils/uuid.util";
 
 @Injectable()
 export class MappingsService {
+  private async resolveMergedIngredientId(ingredientId: string): Promise<string> {
+    let currentId = toPgId(ingredientId);
+    const visited = new Set<string>([currentId]);
+
+    for (let hop = 0; hop < 5; hop++) {
+      const [redirect] = await db
+        .select({ targetId: ingredientRedirects.targetId })
+        .from(ingredientRedirects)
+        .where(eq(ingredientRedirects.sourceId, currentId))
+        .limit(1);
+
+      if (!redirect || visited.has(redirect.targetId)) {
+        break;
+      }
+      visited.add(redirect.targetId);
+      currentId = redirect.targetId;
+    }
+
+    return currentId;
+  }
+
   async createManualMapping(
     productIdInput: string | string[],
     ingredientId: string,
@@ -20,7 +47,17 @@ export class MappingsService {
       throw new BadRequestException("At least one productId is required");
     }
 
-    const pgIngredientId = toPgId(ingredientId);
+    const pgIngredientId = await this.resolveMergedIngredientId(ingredientId);
+
+    const [targetIngredient] = await db
+      .select({ id: ingredients.id })
+      .from(ingredients)
+      .where(eq(ingredients.id, pgIngredientId))
+      .limit(1);
+
+    if (!targetIngredient) {
+      throw new BadRequestException(`Ingredient ${ingredientId} not found`);
+    }
 
     // 1. Create the Pending Audit Log
     const [log] = await db

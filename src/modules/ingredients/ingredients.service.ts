@@ -1,5 +1,8 @@
 import {
   BadRequestException,
+  ConflictException,
+  HttpException,
+  HttpStatus,
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
@@ -8,6 +11,7 @@ import { db } from "@/database/database.module";
 import {
   DerivativeItem,
   IngredientLink,
+  ingredientRedirects,
   ingredients,
   mappings,
   priceHistories,
@@ -83,6 +87,7 @@ const ingredientColumns = {
   fdcId: ingredients.fdcId,
   reviewStatus: ingredients.reviewStatus,
   reviewReason: ingredients.reviewReason,
+  claimedUntil: ingredients.claimedUntil,
   lastModified: ingredients.lastModified,
   createdAt: ingredients.createdAt,
   updatedAt: ingredients.updatedAt,
@@ -570,6 +575,100 @@ export class IngredientsService {
     return merged;
   }
 
+  private getSingularCandidates(low: string): string[] {
+    const candidates: string[] = [];
+    if (low.endsWith("ies") && low.length > 4) {
+      candidates.push(low.slice(0, -3) + "y");
+    }
+    if (low.endsWith("es") && low.length > 3) {
+      candidates.push(low.slice(0, -2));
+    }
+    if (low.endsWith("s") && low.length > 2) {
+      candidates.push(low.slice(0, -1));
+    }
+    return candidates;
+  }
+
+  private async lookupIngredientsByNamesOrAliases(
+    rawNames: string[],
+  ): Promise<Map<string, { id: string; name: string }>> {
+    const result = new Map<string, { id: string; name: string }>();
+    const uniqueInputs = Array.from(
+      new Set(rawNames.map((n) => n.trim().toLowerCase()).filter(Boolean)),
+    );
+    if (uniqueInputs.length === 0) return result;
+
+    const allNameCandidates = new Set<string>(uniqueInputs);
+    for (const low of uniqueInputs) {
+      for (const c of this.getSingularCandidates(low)) {
+        allNameCandidates.add(c);
+      }
+    }
+
+    const byNameRows = await db
+      .select({ id: ingredients.id, name: ingredients.name })
+      .from(ingredients)
+      .where(
+        inArray(sql`lower(${ingredients.name})`, Array.from(allNameCandidates)),
+      );
+
+    const exactNameMap = new Map<string, { id: string; name: string }>();
+    for (const r of byNameRows) {
+      exactNameMap.set(r.name.trim().toLowerCase(), { id: r.id, name: r.name });
+    }
+
+    const remainingForAlias: string[] = [];
+    for (const low of uniqueInputs) {
+      if (exactNameMap.has(low)) {
+        result.set(low, exactNameMap.get(low)!);
+      } else {
+        const singularMatch = this.getSingularCandidates(low).find((c) =>
+          exactNameMap.has(c),
+        );
+        if (singularMatch) {
+          result.set(low, exactNameMap.get(singularMatch)!);
+        } else {
+          remainingForAlias.push(low);
+        }
+      }
+    }
+
+    if (remainingForAlias.length > 0) {
+      const aliasListSql = sql.join(
+        remainingForAlias.map((a) => sql`${a}`),
+        sql`, `,
+      );
+      const aliasRows = await db
+        .select({
+          id: ingredients.id,
+          name: ingredients.name,
+          aliases: ingredients.aliases,
+        })
+        .from(ingredients)
+        .where(
+          sql`EXISTS (SELECT 1 FROM unnest(${ingredients.aliases}) a WHERE lower(trim(a)) IN (${aliasListSql}))`,
+        );
+
+      const aliasMap = new Map<string, { id: string; name: string }>();
+      for (const r of aliasRows) {
+        for (const a of r.aliases || []) {
+          const aLow = String(a || "").trim().toLowerCase();
+          if (aLow && !aliasMap.has(aLow)) {
+            aliasMap.set(aLow, { id: r.id, name: r.name });
+          }
+        }
+      }
+
+      for (const low of remainingForAlias) {
+        if (aliasMap.has(low)) {
+          result.set(low, aliasMap.get(low)!);
+        }
+      }
+    }
+
+    return result;
+  }
+
   private async resolveIngredientLinks(
     links: IngredientLink[],
   ): Promise<IngredientLink[]> {
@@ -583,8 +682,6 @@ export class IngredientsService {
       .map((l) => l.name.trim().toLowerCase());
 
     const idToName = new Map<string, string>();
-    const nameToId = new Map<string, { id: string; name: string }>();
-
     if (idsToLookup.length > 0) {
       const rows = await db
         .select({ id: ingredients.id, name: ingredients.name })
@@ -595,15 +692,7 @@ export class IngredientsService {
       }
     }
 
-    if (namesToLookup.length > 0) {
-      const rows = await db
-        .select({ id: ingredients.id, name: ingredients.name })
-        .from(ingredients)
-        .where(inArray(sql`lower(${ingredients.name})`, namesToLookup));
-      for (const r of rows) {
-        nameToId.set(r.name.trim().toLowerCase(), { id: r.id, name: r.name });
-      }
-    }
+    const nameToId = await this.lookupIngredientsByNamesOrAliases(namesToLookup);
 
     const seen = new Set<string>();
     const resolved: IngredientLink[] = [];
@@ -641,31 +730,98 @@ export class IngredientsService {
       .filter((d) => !d.targetId && d.name?.trim())
       .map((d) => d.name.trim().toLowerCase());
 
-    const nameToId = new Map<string, string>();
-    if (namesToLookup.length > 0) {
-      const rows = await db
-        .select({ id: ingredients.id, name: ingredients.name })
-        .from(ingredients)
-        .where(inArray(sql`lower(${ingredients.name})`, namesToLookup));
-      for (const r of rows) {
-        nameToId.set(r.name.trim().toLowerCase(), r.id);
-      }
-    }
+    const nameToId = await this.lookupIngredientsByNamesOrAliases(namesToLookup);
 
     return derivs.map((d) => {
       if (!d.targetId && d.name?.trim()) {
-        const foundId = nameToId.get(d.name.trim().toLowerCase());
-        if (foundId) {
-          return { ...d, targetId: foundId };
+        const found = nameToId.get(d.name.trim().toLowerCase());
+        if (found) {
+          return { ...d, targetId: found.id };
         }
       }
       return d;
     });
   }
 
-  async updateIngredient(id: string, data: any) {
+  private async resolveIngredientRedirect(
+    txOrDb: typeof db | any,
+    id: string,
+  ): Promise<{ targetId: string; wasMerged: boolean }> {
+    let currentId = toPgId(id);
+    const visited = new Set<string>([currentId]);
+    let wasMerged = false;
+
+    for (let hop = 0; hop < 5; hop++) {
+      const [redirect] = await txOrDb
+        .select({ targetId: ingredientRedirects.targetId })
+        .from(ingredientRedirects)
+        .where(eq(ingredientRedirects.sourceId, currentId))
+        .limit(1);
+
+      if (!redirect) {
+        break;
+      }
+
+      wasMerged = true;
+      if (visited.has(redirect.targetId)) {
+        break;
+      }
+      visited.add(redirect.targetId);
+      currentId = redirect.targetId;
+    }
+
+    return { targetId: currentId, wasMerged };
+  }
+
+  private parseExpectedVersion(raw: string | number): Date | "*" {
+    if (typeof raw === "number") {
+      const parsed = new Date(raw);
+      if (Number.isNaN(parsed.getTime())) {
+        throw new BadRequestException("Invalid expectedUpdatedAt timestamp");
+      }
+      return parsed;
+    }
+
+    let cleaned = raw.trim();
+    if (cleaned === "*") {
+      return "*";
+    }
+    if (cleaned.startsWith("W/")) {
+      cleaned = cleaned.slice(2).trim();
+    }
+    if (cleaned.startsWith('"') && cleaned.endsWith('"') && cleaned.length >= 2) {
+      cleaned = cleaned.slice(1, -1).trim();
+    }
+
+    const asNum = Number(cleaned);
+    const parsed =
+      !Number.isNaN(asNum) && /^\d+$/.test(cleaned)
+        ? new Date(asNum)
+        : new Date(cleaned);
+
+    if (Number.isNaN(parsed.getTime())) {
+      throw new BadRequestException(
+        "Invalid If-Match or expectedUpdatedAt timestamp",
+      );
+    }
+    return parsed;
+  }
+
+  async updateIngredient(id: string, data: any, ifMatch?: string) {
     const pgId = toPgId(id);
-    const payload = { ...data };
+    const { expectedUpdatedAt, ...rest } = data;
+    const rawVersion = ifMatch ?? expectedUpdatedAt;
+
+    if (rawVersion === undefined || rawVersion === null || rawVersion === "") {
+      throw new HttpException(
+        "If-Match header or expectedUpdatedAt field is required",
+        HttpStatus.PRECONDITION_REQUIRED,
+      );
+    }
+
+    const expectedDate = this.parseExpectedVersion(rawVersion);
+
+    const payload: Record<string, any> = { ...rest };
     if (Array.isArray(payload.partOf)) {
       payload.partOf = await this.resolveIngredientLinks(payload.partOf);
     }
@@ -686,17 +842,52 @@ export class IngredientsService {
       );
     }
 
+    const now = new Date();
+    const whereCondition =
+      expectedDate === "*"
+        ? eq(ingredients.id, pgId)
+        : and(
+            eq(ingredients.id, pgId),
+            sql`date_trunc('milliseconds', ${ingredients.updatedAt}) = date_trunc('milliseconds', ${expectedDate.toISOString()}::timestamptz)`,
+          );
+
     try {
       const [updated] = await db
         .update(ingredients)
         .set({
           ...payload,
-          updatedAt: new Date(),
+          lastModified: now,
+          updatedAt: now,
         })
-        .where(eq(ingredients.id, pgId))
+        .where(whereCondition)
         .returning();
 
-      return updated || null;
+      if (updated) {
+        return updated;
+      }
+
+      const [existing] = await db
+        .select({ id: ingredients.id, updatedAt: ingredients.updatedAt })
+        .from(ingredients)
+        .where(eq(ingredients.id, pgId))
+        .limit(1);
+
+      if (existing) {
+        throw new ConflictException({
+          message: "Ingredient was modified concurrently; re-fetch and retry",
+          currentUpdatedAt: existing.updatedAt,
+        });
+      }
+
+      const redirect = await this.resolveIngredientRedirect(db, pgId);
+      if (redirect.wasMerged) {
+        throw new ConflictException({
+          message: `Ingredient ${pgId} was merged into ${redirect.targetId}`,
+          mergedInto: redirect.targetId,
+        });
+      }
+
+      return null;
     } catch (err: any) {
       if (err?.code === "23503") {
         throw new BadRequestException(
@@ -712,6 +903,218 @@ export class IngredientsService {
     }
   }
 
+  private async atomicLinkRelation(
+    id: string,
+    field: "varieties" | "partOf",
+    input: { targetId?: string; name?: string },
+  ) {
+    const pgId = toPgId(id);
+
+    return db.transaction(async (tx) => {
+      const [parent] = await tx
+        .select()
+        .from(ingredients)
+        .where(eq(ingredients.id, pgId))
+        .for("update")
+        .limit(1);
+
+      if (!parent) {
+        const redirect = await this.resolveIngredientRedirect(tx, pgId);
+        if (redirect.wasMerged) {
+          throw new ConflictException({
+            message: `Ingredient ${pgId} was merged into ${redirect.targetId}`,
+            mergedInto: redirect.targetId,
+          });
+        }
+        throw new NotFoundException(`Ingredient ${id} not found`);
+      }
+
+      let linkToAdd: IngredientLink;
+      if (input.targetId) {
+        const resolved = await this.resolveIngredientRedirect(tx, input.targetId);
+        const [target] = await tx
+          .select({ id: ingredients.id, name: ingredients.name })
+          .from(ingredients)
+          .where(eq(ingredients.id, resolved.targetId))
+          .limit(1);
+
+        if (!target) {
+          throw new NotFoundException(
+            `Target ingredient ${input.targetId} not found`,
+          );
+        }
+        linkToAdd = { id: target.id, name: target.name };
+      } else if (input.name) {
+        const [resolvedLink] = await this.resolveIngredientLinks([
+          { id: null, name: input.name.trim() },
+        ]);
+        linkToAdd = resolvedLink;
+      } else {
+        throw new BadRequestException("Target ID or name is required");
+      }
+
+      const currentLinks = ((parent[field] as IngredientLink[] | null) || []).slice();
+      const targetNameLower = linkToAdd.name.trim().toLowerCase();
+      const alreadyExists = currentLinks.some(
+        (item) =>
+          (linkToAdd.id && item.id === linkToAdd.id) ||
+          item.name.trim().toLowerCase() === targetNameLower,
+      );
+
+      if (alreadyExists) {
+        return { added: false, ingredient: parent };
+      }
+
+      const nextLinks = [...currentLinks, linkToAdd];
+      const now = new Date();
+      const [updated] = await tx
+        .update(ingredients)
+        .set({
+          [field]: nextLinks,
+          lastModified: now,
+          updatedAt: now,
+        })
+        .where(eq(ingredients.id, pgId))
+        .returning();
+
+      return { added: true, ingredient: updated };
+    });
+  }
+
+  private async atomicUnlinkRelation(
+    id: string,
+    field: "varieties" | "partOf",
+    targetId: string,
+  ) {
+    const pgId = toPgId(id);
+    const targetPgId = toPgId(targetId);
+
+    return db.transaction(async (tx) => {
+      const [parent] = await tx
+        .select()
+        .from(ingredients)
+        .where(eq(ingredients.id, pgId))
+        .for("update")
+        .limit(1);
+
+      if (!parent) {
+        const redirect = await this.resolveIngredientRedirect(tx, pgId);
+        if (redirect.wasMerged) {
+          throw new ConflictException({
+            message: `Ingredient ${pgId} was merged into ${redirect.targetId}`,
+            mergedInto: redirect.targetId,
+          });
+        }
+        throw new NotFoundException(`Ingredient ${id} not found`);
+      }
+
+      const resolvedTarget = await this.resolveIngredientRedirect(tx, targetPgId);
+      const idsToRemove = new Set([targetPgId, resolvedTarget.targetId]);
+
+      const currentLinks = (parent[field] as IngredientLink[] | null) || [];
+      const nextLinks = currentLinks.filter(
+        (item) => !item.id || !idsToRemove.has(item.id),
+      );
+
+      if (nextLinks.length === currentLinks.length) {
+        return { removed: false, ingredient: parent };
+      }
+
+      const now = new Date();
+      const [updated] = await tx
+        .update(ingredients)
+        .set({
+          [field]: nextLinks,
+          lastModified: now,
+          updatedAt: now,
+        })
+        .where(eq(ingredients.id, pgId))
+        .returning();
+
+      return { removed: true, ingredient: updated };
+    });
+  }
+
+  async linkVariety(
+    id: string,
+    input: { varietyId?: string; id?: string; name?: string },
+  ) {
+    return this.atomicLinkRelation(id, "varieties", {
+      targetId: input.varietyId ?? input.id,
+      name: input.name,
+    });
+  }
+
+  async unlinkVariety(id: string, varietyId: string) {
+    return this.atomicUnlinkRelation(id, "varieties", varietyId);
+  }
+
+  async linkPartOf(
+    id: string,
+    input: { parentId?: string; id?: string; name?: string },
+  ) {
+    return this.atomicLinkRelation(id, "partOf", {
+      targetId: input.parentId ?? input.id,
+      name: input.name,
+    });
+  }
+
+  async unlinkPartOf(id: string, parentId: string) {
+    return this.atomicUnlinkRelation(id, "partOf", parentId);
+  }
+
+  async claimIngredients(options: {
+    limit?: number;
+    claimMinutes?: number;
+    reviewStatus?: string;
+    provenance?: string;
+  }) {
+    const limit = Math.min(Math.max(options.limit ?? 25, 1), 100);
+    const claimMinutes = Math.min(Math.max(options.claimMinutes ?? 10, 1), 120);
+
+    const filterConditions: SQL[] = [
+      sql`(${ingredients.claimedUntil} IS NULL OR ${ingredients.claimedUntil} < NOW())`,
+    ];
+
+    if (options.reviewStatus) {
+      filterConditions.push(eq(ingredients.reviewStatus, options.reviewStatus));
+    }
+    if (options.provenance) {
+      filterConditions.push(eq(ingredients.provenance, options.provenance));
+    }
+
+    const whereClause = and(...filterConditions);
+
+    const rows = await db.transaction(async (tx) => {
+      const candidates = await tx
+        .select({ id: ingredients.id })
+        .from(ingredients)
+        .where(whereClause)
+        .orderBy(asc(ingredients.updatedAt))
+        .for("update", { skipLocked: true })
+        .limit(limit);
+
+      if (candidates.length === 0) {
+        return [];
+      }
+
+      const ids = candidates.map((c) => c.id);
+      const claimExpiry = new Date(Date.now() + claimMinutes * 60 * 1000);
+
+      return tx
+        .update(ingredients)
+        .set({ claimedUntil: claimExpiry })
+        .where(inArray(ingredients.id, ids))
+        .returning(ingredientColumns);
+    });
+
+    return {
+      ingredients: rows,
+      count: rows.length,
+      claimMinutes,
+    };
+  }
+
   async mergeIngredients(
     sourceId: string,
     targetId: string,
@@ -725,23 +1128,36 @@ export class IngredientsService {
     }
 
     return db.transaction(async (tx) => {
-      const [source] = await tx
+      // Lock both rows in deterministic UUID order to prevent deadlocks
+      const lockedRows = await tx
         .select()
         .from(ingredients)
-        .where(eq(ingredients.id, sourcePgId))
-        .limit(1);
+        .where(inArray(ingredients.id, [sourcePgId, targetPgId]))
+        .orderBy(asc(ingredients.id))
+        .for("update");
+
+      const source = lockedRows.find((r) => r.id === sourcePgId);
+      const target = lockedRows.find((r) => r.id === targetPgId);
 
       if (!source) {
+        const redirect = await this.resolveIngredientRedirect(tx, sourcePgId);
+        if (redirect.wasMerged) {
+          throw new ConflictException({
+            message: `Source ingredient ${sourceId} was already merged into ${redirect.targetId}`,
+            mergedInto: redirect.targetId,
+          });
+        }
         throw new NotFoundException(`Source ingredient ${sourceId} not found`);
       }
 
-      const [target] = await tx
-        .select()
-        .from(ingredients)
-        .where(eq(ingredients.id, targetPgId))
-        .limit(1);
-
       if (!target) {
+        const redirect = await this.resolveIngredientRedirect(tx, targetPgId);
+        if (redirect.wasMerged) {
+          throw new ConflictException({
+            message: `Target ingredient ${targetId} was merged into ${redirect.targetId}`,
+            mergedInto: redirect.targetId,
+          });
+        }
         throw new NotFoundException(`Target ingredient ${targetId} not found`);
       }
 
@@ -869,6 +1285,29 @@ export class IngredientsService {
           .where(eq(mappings.id, m.id));
         mappingsUpdated++;
       }
+
+      // Reassign any existing redirects that pointed to sourcePgId -> targetPgId
+      await tx
+        .update(ingredientRedirects)
+        .set({ targetId: targetPgId, mergedAt: new Date() })
+        .where(eq(ingredientRedirects.targetId, sourcePgId));
+
+      // Record redirect for sourcePgId -> targetPgId before deleting source
+      await tx
+        .insert(ingredientRedirects)
+        .values({
+          sourceId: sourcePgId,
+          targetId: targetPgId,
+          sourceName: source.name,
+        })
+        .onConflictDoUpdate({
+          target: ingredientRedirects.sourceId,
+          set: {
+            targetId: targetPgId,
+            sourceName: source.name,
+            mergedAt: new Date(),
+          },
+        });
 
       await tx.delete(ingredients).where(eq(ingredients.id, sourcePgId));
 

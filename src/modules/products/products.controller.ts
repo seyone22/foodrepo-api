@@ -14,6 +14,8 @@ import { ZodValidationPipe } from "nestjs-zod";
 import {
   FetchProductsByIdsDto,
   fetchProductsByIdsSchema,
+  RandomUnmappedProductsQueryDto,
+  randomUnmappedProductsQuerySchema,
   SearchProductsQueryDto,
   searchProductsQuerySchema,
 } from "./dto/products.dto";
@@ -60,9 +62,14 @@ export class ProductsController {
 
   @Get("unmapped/random")
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: "Fetch a random unmapped supermarket product" })
-  async getRandomUnmappedProduct() {
-    const result = await this.productsService.getRandomUnmappedProduct();
+  @ApiOperation({
+    summary: "Fetch random unmapped supermarket product(s) with optional lease claim & non-food filter",
+  })
+  async getRandomUnmappedProduct(
+    @Query(new ZodValidationPipe(randomUnmappedProductsQuerySchema))
+    queryDto: RandomUnmappedProductsQueryDto,
+  ) {
+    const result = await this.productsService.getRandomUnmappedProducts(queryDto);
     if (!result.product) {
       throw new NotFoundException("No unmapped products found");
     }

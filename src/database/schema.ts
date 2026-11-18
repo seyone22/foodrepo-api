@@ -137,6 +137,7 @@ export const ingredients = foodrepo.table("ingredients", {
   density: doublePrecision("density"),
   reviewStatus: text("review_status"),
   reviewReason: text("review_reason"),
+  claimedUntil: timestamp("claimed_until"),
 
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -146,7 +147,23 @@ export const ingredients = foodrepo.table("ingredients", {
   index("idx_ingredients_aliases_gin").using("gin", table.aliases),
   index("idx_ingredients_part_of_gin").using("gin", table.partOf),
   index("idx_ingredients_review_status").on(table.reviewStatus),
+  index("idx_ingredients_claimed_until").on(table.claimedUntil),
 ]);
+
+export const ingredientRedirects = foodrepo.table(
+  "ingredient_redirects",
+  {
+    sourceId: uuid("source_id").primaryKey(),
+    targetId: uuid("target_id")
+      .notNull()
+      .references(() => ingredients.id, { onDelete: "cascade" }),
+    sourceName: text("source_name"),
+    mergedAt: timestamp("merged_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("idx_ingredient_redirects_target_id").on(table.targetId),
+  ],
+);
 
 export const priceSources = foodrepo.table("price_sources", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -196,6 +213,7 @@ export const products = foodrepo.table(
     dietaryType: text("dietary_type"),
     packSize: integer("pack_size"),
     searchTerms: text("search_terms").array(),
+    claimedUntil: timestamp("claimed_until"),
 
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -207,6 +225,7 @@ export const products = foodrepo.table(
     ),
     index("product_sku_idx").on(table.sku),
     index("product_ean_barcode_idx").on(table.eanBarcode),
+    index("idx_products_claimed_until").on(table.claimedUntil),
   ],
 );
 
