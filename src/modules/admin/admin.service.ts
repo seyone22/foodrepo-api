@@ -228,6 +228,7 @@ export class AdminService {
       missingFlavorRes,
       totalUsdaRes,
       totalMappedNutRes,
+      reviewStatusRows,
     ] = await Promise.all([
       db.execute(sql`SELECT count(*)::int AS count FROM ${ingredients}`),
       db.execute(sql`SELECT count(*)::int AS count FROM ${products}`),
@@ -308,6 +309,11 @@ export class AdminService {
       db.execute(sql`SELECT count(*)::int AS count FROM ${ingredients} WHERE coalesce(cardinality(${ingredients.flavorProfile}), 0) = 0`),
       db.execute(sql`SELECT count(*)::int AS count FROM ${usdaFoods}`),
       db.execute(sql`SELECT count(*)::int AS count FROM ${ingredients} WHERE ${ingredients.fdcId} IS NOT NULL`),
+      db.execute(sql`
+        SELECT coalesce(${ingredients.reviewStatus}, 'unreviewed') AS status, count(*)::int AS count
+        FROM ${ingredients}
+        GROUP BY 1
+      `),
     ]);
 
     const totalIngredients = Number((totalIngRes[0] as any)?.count ?? 0);
@@ -321,6 +327,16 @@ export class AdminService {
     const nutritionCoverage =
       totalIngredients > 0 ? (totalMappedNutrition / totalIngredients) * 100 : 0;
 
+    const reviewStatus: Record<string, number> = {
+      unreviewed: 0,
+      verified: 0,
+      flagged: 0,
+      needs_review: 0,
+    };
+    for (const row of reviewStatusRows as any[]) {
+      reviewStatus[row.status] = Number(row.count);
+    }
+
     return {
       totalIngredients,
       totalProducts,
@@ -329,6 +345,7 @@ export class AdminService {
       totalUsdaFoods,
       totalMappedNutrition,
       nutritionCoverage,
+      reviewStatus,
       countries: {
         total: (byCountryRows as any[]).length,
         byCountry: Object.fromEntries(
